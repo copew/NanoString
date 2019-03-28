@@ -1,0 +1,66 @@
+---
+title: "Neural-network different repetition comparison"
+output: pdf_document
+---
+
+We are looking at neuralnetwork with 1 hidden layer, 240 nodes.  
+The neuralnetowrk is iterated 1, 5, 10 and 25 times and the result are show below
+
+
+```{r echo=FALSE, warning = FALSE, message = FALSE}
+library(readr)
+predicted_table_1 <- read_csv("predicted.table.1.csv")
+predicted_table_5 <- read_csv("predicted.table.5.csv")
+predicted_table_10 <- read_csv("predicted.table.10.csv")
+predicted_table_25 <- read_csv("predicted.table.25.csv")
+
+predicted_table_1<- as.matrix(predicted_table_1[,-1])
+predicted_table_5 <- as.matrix(predicted_table_5[, -1])
+predicted_table_10 <- as.matrix(predicted_table_10[, -1])
+predicted_table_25 <- as.matrix(predicted_table_25[, -1])
+
+predicted_table_1
+predicted_table_5
+predicted_table_10
+predicted_table_25 
+```
+
+
+The accuracy is as following:
+
+```{r echo=FALSE}
+acc_1 <- sum(diag(predicted_table_1))/sum(predicted_table_1)
+acc_5 <- sum(diag(predicted_table_5))/sum(predicted_table_5)
+acc_10 <- sum(diag(predicted_table_10))/sum(predicted_table_10)
+acc_25 <- sum(diag(predicted_table_25))/sum(predicted_table_25)
+
+print(paste0("1 repetition: ", acc_1))
+print(paste0("5 repetition: ", acc_5))
+print(paste0("10 repetition: ", acc_10))
+print(paste0("25 repetition: ", acc_25))
+```
+
+
+For each group
+
+1 repetition
+```{r, echo=FALSE}
+diag(predicted_table_1)/margin.table(predicted_table_1, 1)
+```
+
+5 repetition
+```{r, echo=FALSE}
+diag(predicted_table_5)/margin.table(predicted_table_5, 1)
+```
+
+10 repetition
+```{r, echo=FALSE}
+diag(predicted_table_10)/margin.table(predicted_table_10, 1)
+```
+
+25 repetition
+```{r, echo=FALSE}
+diag(predicted_table_25)/margin.table(predicted_table_25, 1)
+```
+
+

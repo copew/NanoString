@@ -1,0 +1,70 @@
+---
+title: "Cases that are not correctly classified"
+output: pdf_document
+---
+
+ 
+
+```{r include=FALSE}
+##loading packages and data
+
+#get package
+library(lattice)
+library(ggplot2)
+library(caret)                                                                             
+library(randomForest)
+
+#Get Data
+load("nanoStringIC_DF.Rdata")
+load("comparison.RData")
+```
+
+
+
+```{r}
+#tidy up data
+nanoStringIC_DF <- na.omit(nanoStringIC_DF)
+nanoStringIC_DF_log <- log(nanoStringIC_DF[, -1]+1)
+
+iClust_ID <- nanoStringIC_DF[,c(1,2)]
+iClust_ID$MB.ID <- rownames(iClust_ID)
+iClust_ID <- iClust_ID[,c(1,3)]
+
+colnames(Clinical)[1] <- "MB.ID"
+rownames(Clinical) <- Clinical$MB.ID
+
+combined_df <- merge(nanoStringIC_DF_log, iClust_ID, by=0)
+rownames(combined_df) <- combined_df$Row.names
+combined_df <- combined_df[,-1]
+
+combined_df <- merge(combined_df, Clinical, by="MB.ID")
+rownames(combined_df) <- combined_df$MB.ID
+ns_df <- combined_df[,2:214]
+
+```
+
+Using randomForest to make a classifier and generate prediction
+
+```{r include=FALSE}
+nanostring_rf <- randomForest(iClust~., data=ns_df, ntree=1500, replace=TRUE, nodesize=1)
+#print(nanostring_rf)
+result_rf <- as.data.frame(nanostring_rf$predicted)
+colnames(result_rf) <- "predicted"
+result_rf$known <- ns_df$iClust
+result_rf$discrepency <- ifelse(result_rf$predicted==result_rf$known, 0, 1)
+result_rf$MB.ID <- rownames(result_rf)
+
+result_rf_combined <- merge(result_rf, Clinical, by="MB.ID")
+```
+
+See if the discrepency is more likely due to which factor
+
+```{r}
+cellularity.lm <- glm(discrepency~cellularity, data=result_rf_combined)
+summary(cellularity.lm)
+
+table(result_rf_combined$discrepency, result_rf_combined$DISCOVERY)
+table(result_rf_combined$discrepency, result_rf_combined$cellularity)
+table(result_rf_combined$discrepency, result_rf_combined$DISCOVERY)
+```
+

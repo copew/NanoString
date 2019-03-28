@@ -1,0 +1,422 @@
+---
+title: "Selecting Candidate Genes from Metabric Samples using all 1980 samples"
+
+output: pdf_document
+---
+
+Using all 1980 samples from original METABRIC dataset, select genes that are most diffrentially expressed in various iClusters
+
+
+```{r}
+library(readr)
+library(limma)
+library(randomForest)
+```
+
+
+```{r}
+#loading data 
+
+#turning Exp into a matrix
+load("/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Other Info/METABRIC_CURTIS_EXPRESSION.RData")
+rownames(Exp) <- Exp$SYMBOL
+#and trim down to only matrix
+Exp <- Exp[, 3:ncol(Exp)]
+Exp <- as.matrix(Exp)
+Exp <- na.omit(Exp)
+#now the metadata
+IntClust <- read_csv("~/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Other Info/IntClust.csv")
+IntClust$ID <- sub("-", ".", IntClust$ID, fixed=T)
+#keeping only the ones that are in Exp
+IntClust <- IntClust[which(IntClust$ID %in% colnames(Exp)), ]
+#now order it the same way
+IntClust <- IntClust[order(match(IntClust$ID, colnames(Exp))), ]
+
+
+#now we have the right matrix and metadata files.  phew
+save(Exp, file="mb_exp_matrix.RData")
+
+load("mb_exp_matrix.Rdata")
+
+```
+
+Now doing the differential expression bit
+
+
+```{r}
+iclust_list <- list()
+for (i in 1:10) {
+  tmp <- IntClust
+  tmp$IntClust <- as.character(tmp$IntClust)
+  tmp$IntClust[which(tmp$IntClust != i)] = 0
+  tmp$IntClust <- as.numeric(tmp$IntClust)
+  iclust_list[[i]] <- tmp
+  }  
+
+```
+
+We have the top 150 differentially expressed genes for each cluster
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+toptables <- list()
+for (i in 1:10){
+  design <- model.matrix(~ iclust_list[[i]]$IntClust)
+  fit <- lmFit(Exp, design)
+  fit <- eBayes(fit)
+  test <- topTable(fit, number=150)
+  toptables[[i]] <- test
+}
+
+#for (i in 1:10){
+ #print(paste0("iClust", i, ":"))
+ #print(rownames(toptables[[i]]))
+  
+#}
+
+save(toptables, file="significantgenes.Rdata")
+```
+
+
+so let's make sure that they are all significant
+
+```{r}
+tmp_list <- list()
+for (i in 1:10) {
+  tmp_list[[i]] <- toptables[[i]][which(toptables[[i]]$P.Value<0.05), ]
+  print(dim(tmp_list[[i]]))
+    }
+
+```
+
+
+so now we have the list of genes, we can pick a list of genes and then we can now do the random forest....... 
+let's keep 150 for IC1 and 2, and 50 genes for the rest
+
+```{r}
+genes <- c(rownames(toptables[[1]]), rownames(toptables[[2]]))
+
+for (i in 3:10){
+  genes <- c(genes, rownames(toptables[[i]])[1:50])
+  }
+
+
+#keeping unique ones only
+genes <- unique(genes)
+
+save(genes, file="genes for 1980 samples.RData")
+
+```
+
+now we try to trim down the data matrix, keeping only the genes that are useful
+
+```{r}
+mb_data_trimmed <- Exp[which(rownames(Exp) %in% genes), ]
+
+dim(mb_data_trimmed)
+```
+
+
+now we have a matrix mb_data_trimmed, with rownames as important genes, and colnames are sample names
+
+```{r}
+#checking the colnames of the data matrix is in the same order as rows in the metadata df
+sum(colnames(mb_data_trimmed)==IntClust$ID)
+```
+
+```{r}
+#now testing if random forest can work with just one data.....
+mb_data_trimmed <- t(mb_data_trimmed)
+IntClust$IntClust <- as.factor(IntClust$IntClust)
+
+
+rftest <- randomForest(mb_data_trimmed[-1,], IntClust$IntClust[-1])
+predict(rftest, mb_data_trimmed[1,])
+
+#now the random forest bit
+
+rf_list_loocv <- lapply(1:nrow(mb_data_trimmed), function(i) {
+  set.seed(100)
+  tmp <- mb_data_trimmed[-i,]
+  ic <- IntClust$IntClust[-i]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[i,], type = "response", predict.all=TRUE)
+  return(data.frame(rownames(mb_data_trimmed)[i], tmp.pred$aggregate))
+})
+
+
+save(rf_list_loocv, file="rf_list_loocv.RData")
+
+rf_loocv <- do.call(rbind.data.frame, rf_list_loocv)
+sum(rf_loocv$rownames.mb_data_trimmed..i.==IntClust$ID)
+#good now the rows are the same
+
+rf_loocv_table <- table(rf_loocv$tmp.pred.aggregate, IntClust$IntClust)
+save(rf_loocv_table, file="rf_loocv_table.RData")
+diag(rf_loocv_table)/margin.table(rf_loocv_table, 2)
+
+```
+
+then we run 1 ic vs the rest for all the int clusters
+
+```{r}
+#start with iclust 1
+IntClust$iClust1 <- as.character(IntClust$IntClust)
+IntClust$iClust1[which(IntClust$iClust1 != 1)] = "others"
+IntClust$iClust1 <- factor(IntClust$iClust1)
+
+
+
+
+rf_list_ic1 <- lapply(1:nrow(mb_data_trimmed), function(i) {
+  set.seed(100)
+  tmp <- mb_data_trimmed[-i,]
+  ic <- IntClust$iClust1[-i]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[i,], type = "response", predict.all=TRUE)
+  return(data.frame(rownames(mb_data_trimmed)[i], tmp.pred$aggregate))
+})
+
+save(rf_list_ic1, file="rf_list_ic1.RData")
+
+
+```
+
+
+try with iCluster 2, using the kth fold thing (leave out 1:100, 101:200 etc)
+
+```{r}
+#first create a vector i - or a list???
+list_i <- list()
+for (j in 1:19) {
+  list_i[[j]] <- seq(((j-1)*100+1),(j*100))
+  #print(j)
+}
+list_i[[20]] <- seq(1901, 1980)
+
+#then run it with a for loop to print i so we can find out if it's crashing ... 
+#that's the plan anyway
+
+#so create a list for result first
+rf_ic2_kfcv_list <- list()
+for (k in 1:20){
+  set.seed(100)
+  tmp <- mb_data_trimmed[-list_i[[k]],]
+  ic <- IntClust$iClust2[-list_i[[k]]]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[list_i[[k]],], type = "response", predict.all=TRUE)
+  rf_ic2_kfcv_list[[k]] <- data.frame(rownames(mb_data_trimmed)[list_i[[k]]], tmp.pred$aggregate)
+  print(k)
+  }
+
+#and lets make it into a dataframe
+rf_ic2_kfcv <- do.call(rbind.data.frame, rf_ic2_kfcv_list)
+
+rf_ic2_kfcv_table<- table(rf_ic2_kfcv$tmp.pred.aggregate, IntClust$iClust2)
+save(rf_ic2_kfcv_table, file="rf_ic2_ifcv_table.Rdata")
+```
+
+so let's try kth fold cross validation now, leaving 100 out at a time...
+
+```{r}
+#so create a list for result first
+rf_kfcv_list <- list()
+for (k in 1:20){
+  set.seed(100)
+  tmp <- mb_data_trimmed[-list_i[[k]],]
+  ic <- IntClust$IntClust[-list_i[[k]]]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[list_i[[k]],], type = "response", predict.all=TRUE)
+  rf_kfcv_list[[k]] <- data.frame(rownames(mb_data_trimmed)[list_i[[k]]], tmp.pred$aggregate)
+  print(k)
+  }
+
+#and lets make it into a dataframe
+rf_kfcv <- do.call(rbind.data.frame, rf_kfcv_list)
+
+rf_kfcv_table<- table(rf_kfcv$tmp.pred.aggregate, IntClust$IntClust)
+save(rf_kfcv_table, file="rf_kfcv_table.Rdata")
+```
+
+So now we use only the genes that are good for each group, and do individual group vs others.
+For example, using the 150 genes that were selected for ic1, to classify ic1 vs others
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+#so the files are: mb_data_trimmed, toptables for the genes, intclust for the ic information
+#need list_i for k fold cross validation
+
+#start with iC1
+rf_selectedgenes_ic1_kfcv_list <- list()
+for (k in 1:20){
+  set.seed(100)
+  tmp <- mb_data_trimmed[-list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[1]]))]
+  ic <- IntClust$iClust1[-list_i[[k]]]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[1]]))], type = "response", predict.all=TRUE)
+  rf_selectedgenes_ic1_kfcv_list[[k]] <- data.frame(rownames(mb_data_trimmed)[list_i[[k]]], tmp.pred$aggregate)
+  print(k)
+  }
+
+
+rf_selectedgenes_ic1_kfcv <- do.call(rbind.data.frame, rf_selectedgenes_ic1_kfcv_list)
+rf_selectedgenes_ic1_kfcv_table<- table(rf_selectedgenes_ic1_kfcv$tmp.pred.aggregate, IntClust$iClust1)
+
+
+#now iC2
+
+rf_selectedgenes_ic2_kfcv_list <- list()
+for (k in 1:20){
+  set.seed(100)
+  tmp <- mb_data_trimmed[-list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[2]]))]
+  ic <- IntClust$iClust2[-list_i[[k]]]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[2]]))], type = "response", predict.all=TRUE)
+  rf_selectedgenes_ic2_kfcv_list[[k]] <- data.frame(rownames(mb_data_trimmed)[list_i[[k]]], tmp.pred$aggregate)
+  print(k)
+  }
+rf_selectedgenes_ic2_kfcv <- do.call(rbind.data.frame, rf_selectedgenes_ic2_kfcv_list)
+rf_selectedgenes_ic2_kfcv_table<- table(rf_selectedgenes_ic2_kfcv$tmp.pred.aggregate, IntClust$iClust2)
+
+
+#and ic3
+
+rf_selectedgenes_ic3_kfcv_list <- list()
+for (k in 1:20){
+  set.seed(100)
+  tmp <- mb_data_trimmed[-list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[3]])[1:50])]
+  ic <- IntClust$iClust3[-list_i[[k]]]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[3]])[1:50])], type = "response", predict.all=TRUE)
+  rf_selectedgenes_ic3_kfcv_list[[k]] <- data.frame(rownames(mb_data_trimmed)[list_i[[k]]], tmp.pred$aggregate)
+  print(k)
+  }
+rf_selectedgenes_ic3_kfcv <- do.call(rbind.data.frame, rf_selectedgenes_ic3_kfcv_list)
+rf_selectedgenes_ic3_kfcv_table<- table(rf_selectedgenes_ic3_kfcv$tmp.pred.aggregate, IntClust$iClust3)
+save(rf_selectedgenes_ic3_kfcv_table, file="rf_selectedgenes_ic3_kfcv_table.RData")
+
+#ic4
+rf_selectedgenes_ic4_kfcv_list <- list()
+
+for (k in 1:20){
+  set.seed(100)
+  tmp <- mb_data_trimmed[-list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[4]])[1:50])]
+  ic <- IntClust$iClust4[-list_i[[k]]]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[4]])[1:50])], type = "response", predict.all=TRUE)
+  rf_selectedgenes_ic4_kfcv_list[[k]] <- data.frame(rownames(mb_data_trimmed)[list_i[[k]]], tmp.pred$aggregate)
+  print(k)
+  }
+rf_selectedgenes_ic4_kfcv <- do.call(rbind.data.frame, rf_selectedgenes_ic4_kfcv_list)
+rf_selectedgenes_ic4_kfcv_table<- table(rf_selectedgenes_ic4_kfcv$tmp.pred.aggregate, IntClust$iClust4)
+save(rf_selectedgenes_ic4_kfcv_table, file="rf_selectedgenes_ic4_kfcv_table.RData")
+
+```
+
+
+and we keep going to ic5 and beyond
+
+```{r}
+#ic5
+rf_selectedgenes_ic5_kfcv_list <- list()
+
+for (k in 1:20){
+  set.seed(100)
+  tmp <- mb_data_trimmed[-list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[5]])[1:50])]
+  ic <- IntClust$iClust5[-list_i[[k]]]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[5]])[1:50])], type = "response", predict.all=TRUE)
+  rf_selectedgenes_ic5_kfcv_list[[k]] <- data.frame(rownames(mb_data_trimmed)[list_i[[k]]], tmp.pred$aggregate)
+  print(k)
+  }
+rf_selectedgenes_ic5_kfcv <- do.call(rbind.data.frame, rf_selectedgenes_ic5_kfcv_list)
+rf_selectedgenes_ic5_kfcv_table<- table(rf_selectedgenes_ic5_kfcv$tmp.pred.aggregate, IntClust$iClust5)
+save(rf_selectedgenes_ic5_kfcv_table, file="rf_selectedgenes_ic5_kfcv_table.RData")
+
+
+
+#ic6
+rf_selectedgenes_ic6_kfcv_list <- list()
+
+for (k in 1:20){
+  set.seed(100)
+  tmp <- mb_data_trimmed[-list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[6]])[1:50])]
+  ic <- IntClust$iClust6[-list_i[[k]]]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[6]])[1:50])], type = "response", predict.all=TRUE)
+  rf_selectedgenes_ic6_kfcv_list[[k]] <- data.frame(rownames(mb_data_trimmed)[list_i[[k]]], tmp.pred$aggregate)
+  print(k)
+  }
+rf_selectedgenes_ic6_kfcv <- do.call(rbind.data.frame, rf_selectedgenes_ic6_kfcv_list)
+rf_selectedgenes_ic6_kfcv_table<- table(rf_selectedgenes_ic6_kfcv$tmp.pred.aggregate, IntClust$iClust6)
+save(rf_selectedgenes_ic6_kfcv_table, file="rf_selectedgenes_ic6_kfcv_table.RData")
+
+
+
+#ic7
+rf_selectedgenes_ic7_kfcv_list <- list()
+
+for (k in 1:20){
+  set.seed(100)
+  tmp <- mb_data_trimmed[-list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[7]])[1:50])]
+  ic <- IntClust$iClust7[-list_i[[k]]]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[7]])[1:50])], type = "response", predict.all=TRUE)
+  rf_selectedgenes_ic7_kfcv_list[[k]] <- data.frame(rownames(mb_data_trimmed)[list_i[[k]]], tmp.pred$aggregate)
+  print(k)
+  }
+rf_selectedgenes_ic7_kfcv <- do.call(rbind.data.frame, rf_selectedgenes_ic7_kfcv_list)
+rf_selectedgenes_ic7_kfcv_table<- table(rf_selectedgenes_ic7_kfcv$tmp.pred.aggregate, IntClust$iClust7)
+save(rf_selectedgenes_ic7_kfcv_table, file="rf_selectedgenes_ic7_kfcv_table.RData")
+
+#ic8 (nearly there....)
+rf_selectedgenes_ic8_kfcv_list <- list()
+
+for (k in 1:20){
+  set.seed(100)
+  tmp <- mb_data_trimmed[-list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[8]])[1:50])]
+  ic <- IntClust$iClust8[-list_i[[k]]]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[8]])[1:50])], type = "response", predict.all=TRUE)
+  rf_selectedgenes_ic8_kfcv_list[[k]] <- data.frame(rownames(mb_data_trimmed)[list_i[[k]]], tmp.pred$aggregate)
+  print(k)
+  }
+rf_selectedgenes_ic8_kfcv <- do.call(rbind.data.frame, rf_selectedgenes_ic8_kfcv_list)
+rf_selectedgenes_ic8_kfcv_table<- table(rf_selectedgenes_ic8_kfcv$tmp.pred.aggregate, IntClust$iClust8)
+save(rf_selectedgenes_ic8_kfcv_table, file="rf_selectedgenes_ic8_kfcv_table.RData")
+
+
+#ic9
+rf_selectedgenes_ic9_kfcv_list <- list()
+
+for (k in 1:20){
+  set.seed(100)
+  tmp <- mb_data_trimmed[-list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[9]])[1:50])]
+  ic <- IntClust$iClust9[-list_i[[k]]]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[9]])[1:50])], type = "response", predict.all=TRUE)
+  rf_selectedgenes_ic9_kfcv_list[[k]] <- data.frame(rownames(mb_data_trimmed)[list_i[[k]]], tmp.pred$aggregate)
+  print(k)
+  }
+rf_selectedgenes_ic9_kfcv <- do.call(rbind.data.frame, rf_selectedgenes_ic9_kfcv_list)
+rf_selectedgenes_ic9_kfcv_table<- table(rf_selectedgenes_ic9_kfcv$tmp.pred.aggregate, IntClust$iClust9)
+save(rf_selectedgenes_ic9_kfcv_table, file="rf_selectedgenes_ic9_kfcv_table.RData")
+```
+and finally
+
+
+```{r}
+#ic10
+rf_selectedgenes_ic10_kfcv_list <- list()
+
+for (k in 1:20){
+  set.seed(100)
+  tmp <- mb_data_trimmed[-list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[10]])[1:50])]
+  ic <- IntClust$iClust10[-list_i[[k]]]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_data_trimmed[list_i[[k]],which(colnames(mb_data_trimmed) %in% rownames(toptables[[10]])[1:50])], type = "response", predict.all=TRUE)
+  rf_selectedgenes_ic10_kfcv_list[[k]] <- data.frame(rownames(mb_data_trimmed)[list_i[[k]]], tmp.pred$aggregate)
+  print(k)
+  }
+rf_selectedgenes_ic10_kfcv <- do.call(rbind.data.frame, rf_selectedgenes_ic10_kfcv_list)
+rf_selectedgenes_ic10_kfcv_table<- table(rf_selectedgenes_ic10_kfcv$tmp.pred.aggregate, IntClust$iClust10)
+save(rf_selectedgenes_ic10_kfcv_table, file="rf_selectedgenes_ic10_kfcv_table.RData")
+```
+

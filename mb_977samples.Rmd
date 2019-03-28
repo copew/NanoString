@@ -1,0 +1,179 @@
+---
+title: "mb_997samples"
+output: pdf_document
+---
+
+We will eventually go back to the original 997 discovery set to select genes.  
+
+First we look at how
+
+
+using 1980 samples
+681 genes that has been selected
+using ic10 package
+
+```{r}
+#load data
+#mb_data_trimmed
+
+
+features <- matchFeatures(Exp=t(mb_data_trimmed), Exp.by.feat="gene")
+features <- normalizeFeatures(features, "scale")
+res <- iC10(features)
+
+res$class
+
+sum(names(res$class)==IntClust$ID)
+
+table(res$class, IntClust$IntClust)
+prop.table(table(res$class, IntClust$IntClust), 2)
+```
+
+so now only get the "purest" discovey set samples to select genes
+
+```{r}
+#get the IDs
+mb_discoveryset <- read.table("/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Other Info/discovery_set_iC.txt", sep="\t", header = T)
+mb_discoveryset$METABRIC_ID <-  sub("-", ".", mb_discoveryset$METABRIC_ID, fixed=T)
+
+#load(Exp)
+
+#now subset the datasets  to 977 samples
+mb_977 <- Exp[, which(colnames(Exp) %in% mb_discoveryset$METABRIC_ID)]
+IntClust977 <- IntClust[which(IntClust$ID %in% mb_discoveryset$METABRIC_ID), ]
+```
+
+
+creating list for each iclust in order to work out differential expression
+```{r}
+iclust_list <- list()
+for (i in 1:10) {
+  tmp <- IntClust977
+  tmp$IntClust <- as.character(tmp$IntClust)
+  tmp$IntClust[which(tmp$IntClust != i)] = 0
+  tmp$IntClust <- as.numeric(tmp$IntClust)
+  iclust_list[[i]] <- tmp
+  } 
+```
+
+
+We have the top 150 differentially expressed genes for each cluster
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+toptables <- list()
+for (i in 1:10){
+  design <- model.matrix(~ iclust_list[[i]]$IntClust)
+  fit <- lmFit(mb_977, design)
+  fit <- eBayes(fit)
+  test <- topTable(fit, number=150)
+  toptables[[i]] <- test
+}
+
+# no number limit, but only significant ones
+toptables_all <- list()
+for (i in 1:10){
+  design <- model.matrix(~ iclust_list[[i]]$IntClust)
+  fit <- lmFit(mb_977, design)
+  fit <- eBayes(fit)
+  test <- topTable(fit, number=676)
+  toptables_all[[i]] <- test[which(test$P.Value<0.05), ]
+}
+
+all_sig_genes <- vector()
+
+for (i in 1:10){
+  all_sig_genes <- c(all_sig_genes, rownames(toptables_all[[i]]))
+}
+
+
+```
+
+so let's make sure that they are all significant
+
+```{r}
+tmp_list <- list()
+for (i in 1:10) {
+  tmp_list[[i]] <- toptables[[i]][which(toptables[[i]]$P.Value<0.05), ]
+  print(dim(tmp_list[[i]]))
+    }
+```
+so now we have the list of genes, we can pick a list of genes and then we can now do the random forest....... 
+let's keep 150 for IC1 and 2, and 50 genes for the rest
+
+```{r}
+genes_977 <- c(rownames(toptables[[1]]), rownames(toptables[[2]]))
+
+for (i in 3:10){
+  genes_977 <- c(genes_977, rownames(toptables[[i]])[1:50])
+  }
+
+
+#keeping unique ones only
+genes_977 <- unique(genes_977)
+
+save(genes_977, file="genes for 977 samples.RData")
+
+```
+
+
+so let's now make a trimmed 977 samples with 676 genes dataframe
+
+```{r}
+mb_977_trimmedgenes <- mb_977[which(rownames(mb_977) %in% genes_977), ]
+#so this is a 676 genes (rows) with 997 columns of samples
+
+#and let's transform it and make sure the intclust 977 is also factors
+
+mb_977_trimmedgenes <- t(mb_977_trimmedgenes)
+#str(IntClust977)
+
+#and check that the rownames and colnames ar ethe same
+sum(rownames(mb_977_trimmedgenes)==IntClust977$ID)
+
+```
+
+and now the random forest with LOOCV 
+
+```{r}
+rf_977_loocv <- lapply(1:nrow(mb_977_trimmedgenes), function(i) {
+  set.seed(100)
+  tmp <- mb_977_trimmedgenes[-i,]
+  ic <- IntClust977$IntClust[-i]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_977_trimmedgenes[i,], type = "response", predict.all=TRUE)
+  return(data.frame(rownames(mb_977_trimmedgenes)[i], tmp.pred$aggregate))
+})
+
+
+save(rf_977_loocv, file="rf_977_loocv.RData")
+
+rf_977_loocv_df <- do.call(rbind.data.frame, rf_977_loocv)
+
+sum(rf_977_loocv_df$rownames.mb_977_trimmedgenes..i.==IntClust977$ID)
+
+rf_977_loocv_table <- table(rf_977_loocv_df$tmp.pred.aggregate, IntClust977$IntClust)
+save(rf_977_loocv_table, file="rf_977_loocv_table.RData")
+```
+
+
+individual cluster vs others and stick with LOOCV
+
+```{r}
+rf_977_676_ic1_kfcv_list <- list()
+for (k in 1:977){
+  set.seed(100)
+  tmp <- mb_977_trimmedgenes[-k,]
+  ic <- IntClust977$iClust1[-k]
+  tmp.rf <- randomForest(tmp, ic)
+  tmp.pred <- predict(tmp.rf, mb_977_trimmedgenes[k, ], type = "response", predict.all=TRUE)
+  rf_977_676_ic1_kfcv_list[[k]] <- data.frame(rownames(mb_977_trimmedgenes)[[k]], tmp.pred$aggregate)
+  print(k)
+  }
+
+
+rf_selectedgenes_ic1_kfcv <- do.call(rbind.data.frame, rf_selectedgenes_ic1_kfcv_list)
+rf_selectedgenes_ic1_kfcv_table<- table(rf_selectedgenes_ic1_kfcv$tmp.pred.aggregate, IntClust$iClust1)
+
+
+
+```
+

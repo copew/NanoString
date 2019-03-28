@@ -1,0 +1,56 @@
+---
+title: "Feature Selection"
+output: pdf_document
+---
+
+
+**Aim**
+To generate a classifier to classify breast tumours into Integrative Clusters (iClust) using data obtained using NanoString platform.
+
+
+#Summary of Samples
+480 samples with known iClust status
+212 genes selected previously from the original classifier
+
+
+```{r Preparation, echo=FALSE}
+#loading libraries
+library(ggplot2)
+library(lattice)
+library(caret)
+library(foreach)
+library(iterators)
+#library(doMC)
+library(parallel)
+library(rpart)
+
+#set up multicore
+#registerDoMC(cores = 4)
+
+#loading data
+setwd("/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/R scripts")
+load("nanoStringIC_DF.RData")
+
+#remove na
+nanoStringIC_DF <- na.omit(nanoStringIC_DF)
+
+```
+
+#Feature Selection
+
+This step is to select genes that are sufficiently differentially expressed between the groups.
+
+All of the 212 iClust genes are included.
+Approximately 100 immune genes are also differentially expressed.  However these are not included here.  They will be included later.
+
+
+```{r Feature Selection, echo=FALSE}
+features <- data.frame(
+  p=sapply(2:ncol(nanoStringIC_DF),function(i){
+    anova(lm(log(nanoStringIC_DF[,i]+0.001) ~ nanoStringIC_DF$iClust))$"Pr(>F)"[1]
+  }),
+  ID=colnames(nanoStringIC_DF)[-1]
+)
+feature.ordered <- features[order(features$p),]
+feature.ordered
+```

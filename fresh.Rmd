@@ -1,0 +1,369 @@
+---
+title: "Using fresh RNA"
+output: pdf_document
+---
+
+
+
+```{r}
+library(NanoStringNorm)
+library(ggplot2)
+library(reshape2)
+#dev.off()
+
+# coliClust <- c('#FF5500', '#00EE76', '#CD3278','#00C5CD', '#B5D0D2', '#8B0000', '#FFFF40', '#0000CD', '#FFAA00', '#EE82EE', '#7D26CD')
+# coliClust <- data.frame(c("1", "2", "3", "4ER+", "4ER-", "5", "6", "7","8", "9", "10"),coliClust)
+# colnames(coliClust)[1] <- "Clust11"
+# colnames(coliClust)[2] <- "Colour Codes"
+# coliClust$`Colour Codes` <- as.character(coliClust$`Colour Codes`)
+# 
+# ###This divides iC4 into iC4ER+ and iC4ER-. You might want to omit that for now, in that case do 
+#           
+#                
+# coliClust10 <- c('#FF5500', '#00EE76', '#CD3278','#00C5CD', '#8B0000','#FFFF40', '#0000CD', '#FFAA00', '#EE82EE', '#7D26CD')
+# coliClust10 <- data.frame(c("1", "2", "3", "4", "5", "6", "7","8", "9", "10"),coliClust10)
+# colnames(coliClust10)[1] <- "iClust"
+# colnames(coliClust10)[2] <- "Colour Codes"
+# coliClust10$`Colour Codes` <- as.character(coliClust10$`Colour Codes`)
+# 
+# save(coliClust10, file = "iC10_colour.RData")
+# 
+# #str(coliClust10)
+
+##remember to change input and output folder names!!!!!!!!!!!!!!####
+load("nanoStringIC_DF.RData")
+
+batchNumber <- "fresh"
+metadataFolder <- "/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Other Info/"
+nanostringDataFolder <- paste0("/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Digital Analyser/",batchNumber,"/")
+outputFolder <- paste0("/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Nanostring QC/",batchNumber,"QC/")
+
+dir.create(outputFolder,showWarnings = FALSE)
+
+iC10genesFile <- paste0(metadataFolder,"for_nanostring.txt")
+metabricExpressionData <- paste0(metadataFolder,"METABRIC_CURTIS_EXPRESSION.RData")
+
+
+#pdf(paste0(outputFolder,"metrics.pdf"), width=11, height=8)
+
+nanoStringFiles <- list.files(nanostringDataFolder, pattern = "MB-AD", recursive = T, full.names = T)
+nanoStringData <- lapply(nanoStringFiles, read.csv,
+                         skip = 26, header = T, nrows = 773,quote=NULL,
+                         stringsAsFactors = F)
+#extract metabric id from file id
+metabricID <- regmatches(nanoStringFiles, regexpr("MB-AD-[0-9]*", nanoStringFiles))
+
+#rename count column to metabric ID
+for (i in seq_along(nanoStringData)){
+  colnames(nanoStringData[[i]])[colnames(nanoStringData[[i]])=="Count"] <-metabricID[[i]]
+}
+
+#convert list to dataframe
+nanoStringData <- do.call("cbind", nanoStringData)
+nanoStringData <- nanoStringData[, !duplicated(colnames(nanoStringData), fromLast = FALSE)] 
+
+#dim(nanoStringData)
+
+##exclude dodgy samples
+#nanoStringData<-nanoStringData[,!colnames(nanoStringData) %in% c("MB-AD-0414", "MB-AD-0129")]
+#head(nanoStringData)
+#dim(nanoStringData)
+
+librarySize=data.frame(sample=names(nanoStringData[,c(4:ncol(nanoStringData))]),size=colSums(nanoStringData[,c(4:ncol(nanoStringData))]))
+# ggplot(librarySize,aes(x=sample,y=size))+
+#   geom_bar(stat="identity",color="black",fill="gray80")+
+#   labs(x="Sample",y="Total counts",title="Distribution of raw counts across samples")+
+#   theme_bw(base_size=16)+
+#   theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+
+
+#normalisation using NanoStringNorm
+normalisedNanoStringData <- NanoStringNorm(
+  x = nanoStringData,
+  anno = NA,
+  CodeCount = 'sum',
+  Background = 'mean',
+  SampleContent = 'housekeeping.sum',
+  round.values = FALSE,
+  take.log = FALSE,
+  return.matrix.of.endogenous.probes = TRUE
+)
+
+
+normalisedLibrarySize <- data.frame(sample=colnames(normalisedNanoStringData),size=colSums(normalisedNanoStringData))
+meltednormalisedNanoStringData<-melt(normalisedNanoStringData)
+
+# ggplot(normalisedLibrarySize,aes(x=sample,y=size))+
+#   geom_bar(stat="identity",color="black",fill="gray80")+
+#   labs(x="Sample",y="Normalised total counts",title="Distribution of normalised counts across samples")+
+#   theme_bw(base_size=16)+
+#   theme(axis.text.x = element_text(angle = 90, hjust = 1))
+# 
+# ggplot(meltednormalisedNanoStringData,aes(x=Var2,y=log(value+1.1)))+
+#   geom_boxplot(color="black",fill="gray80")+
+#   labs(x="Sample",y="Log Normalised total counts",title="Distribution of normalised counts within sample")+
+#   scale_y_continuous(breaks=c(0,2,4,6,8,10))+
+#   theme_bw()+
+#   theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+meltedMeans<-data.frame(gene=rownames(normalisedNanoStringData),mean=rowMeans(normalisedNanoStringData))
+meltedMeans[meltedMeans$mean<=1,]
+meltedMeans[meltedMeans$mean>1000,]
+
+#distribution of all genes
+# ggplot(meltedMeans,aes(x=(mean)))+
+#   geom_histogram(binwidth = 0.15, color="black", fill="gray80")+
+#   theme_bw(base_size=16)+
+#   scale_x_log10(breaks=c(0,1,5,10,25,50,100,250,500,1000,2500,5000,10000))+
+#   labs(x="Mean Normalised Nanostring Count across samples (log scale)",y="Number of genes",title="Distribution of gene counts")
+
+
+#220 genes identfied by marcus
+iCgenes220 <- scan(iC10genesFile,what = character())
+
+dim(normalisedNanoStringData)
+
+#saveRDS(normalisedNanoStringData, "nanostring_total.RDS")
+
+nanoStringIC<-normalisedNanoStringData[rownames(normalisedNanoStringData) %in% iCgenes220,]
+meltedMeans<-data.frame(gene=rownames(nanoStringIC),mean=rowMeans(nanoStringIC))
+# ggplot(meltedMeans,aes(x=(mean)))+
+#   geom_histogram(binwidth = 0.25, color="black", fill="gray80")+
+#   theme_bw()+
+#   scale_x_log10(breaks=c(0,1,5,10,25,50,100,250,500,1000,2500,5000,10000))+
+#   labs(x="Mean Normalised Nanostring Count across samples (log scale)",y="Number of genes",title="Distribution of iC10 classifier gene counts")
+
+#dev.off()
+
+
+load(metabricExpressionData)
+
+mb_expression <- Exp[which(Exp[,1] %in% rownames(nanoStringIC)),]
+
+nanoStringIC=nanoStringIC[sort(rownames(nanoStringIC)),]
+mb_expression[,1]<-as.character(mb_expression[,1])
+mb_expression <- mb_expression[match(rownames(nanoStringIC), mb_expression[,1]),]
+mb_expression=mb_expression[!is.na(mb_expression$SYMBOL),]
+colnames(mb_expression) <- sub(".", "-", colnames(mb_expression), fixed=T)
+colnames(mb_expression)
+
+colnames(nanoStringIC) <- sub("-AD-", "-", colnames(nanoStringIC), fixed=T)
+colnames(nanoStringIC)
+
+rownames(mb_expression) <- mb_expression[,1]
+mb_expression <- mb_expression[,which(colnames(mb_expression) %in% colnames(nanoStringIC))]
+
+#dim(mb_expression)
+#colnames(mb_expression)
+nanoStringIC <- nanoStringIC[,colnames(mb_expression)]
+nanoStringIC <- nanoStringIC[rownames(nanoStringIC)%in% rownames(mb_expression),]
+dim(nanoStringIC)
+
+mean(rownames(nanoStringIC) == rownames(mb_expression))
+mean(colnames(nanoStringIC) == colnames(mb_expression))
+
+
+
+
+###all the r
+
+
+cors <- data.frame(
+  cors=sapply(1:ncol(mb_expression),function(i){
+    cor(nanoStringIC[,i], mb_expression[,i],method="spearman")
+  }),
+  MB.ID=colnames(mb_expression)
+  )
+
+ ggplot(cors, aes(x=cors)) + geom_histogram(binwidth=0.01)+theme_bw(base_size=16)+labs(x="Correlation of Samples", y="Frequency")
+
+cors_asc <- cors[with(cors, order(cors)), ] 
+head(cors_asc, 25) 
+
+
+ #View(cors)
+
+
+ 
+##plots per sample
+
+pdf(paste0(outputFolder,"Plots_per_sample.pdf"), width=8.3, height=11.7)
+par(mfrow=c(4, 4))
+for (i in 1:ncol(mb_expression)) {
+   plot(log2(nanoStringIC[,i]), mb_expression[,i], main=colnames(mb_expression)[i], xlab="Nanostring",
+        ylab="Illumina")
+ 
+   linMod<-lm(unlist(mb_expression[,i]) ~ log2(as.numeric(nanoStringIC[,i]+1)))
+   modsum = summary(linMod)
+   r2 = modsum$adj.r.squared
+   my.p = modsum$coefficients[2,4]
+   rp = vector('expression',2)
+ rp[1] = substitute(expression(italic(R)^2 == MYVALUE),
+                     list(MYVALUE = format(r2,dig=3)))[2]
+   rp[2] = substitute(expression(italic(p) == MYOTHERVALUE),
+                      list(MYOTHERVALUE = format(my.p, digits = 2)))[2]
+   abline(linMod,col="red")
+   legend('topleft', legend = rp, bty = 'n')
+}
+dev.off()
+
+##plots per gene
+
+pdf(paste0(outputFolder,"Plots_per_gene.pdf"))
+par(mfrow=c(2, 2))
+for (i in 1:nrow(mb_expression)) {
+  plot(log2(nanoStringIC[i,]+1), mb_expression[i,], main=rownames(mb_expression)[i], xlab="Nanostring",
+       ylab="Illumina")
+  linMod<-lm(unlist(mb_expression[i,]) ~ log2(as.numeric(nanoStringIC[i,]+1)))
+  modsum = summary(linMod)
+  r2 = modsum$adj.r.squared
+  my.p = modsum$coefficients[2,4]
+  rp = vector('expression',2)
+  rp[1] = substitute(expression(italic(R)^2 == MYVALUE),
+                     list(MYVALUE = format(r2,dig=3)))[2]
+  rp[2] = substitute(expression(italic(p) == MYOTHERVALUE),
+                     list(MYOTHERVALUE = format(my.p, digits = 2)))[2]
+  abline(linMod,col="red")
+  legend('topleft', legend = rp, bty = 'n')
+
+  }
+dev.off()
+
+#r values per gene
+mb_expression_matrix <- data.matrix(mb_expression) 
+cors_gene <- data.frame(
+  cors=sapply(1:nrow(mb_expression_matrix),function(i){
+    cor(nanoStringIC[i, ],mb_expression_matrix[i, ], method="spearman")
+  }), 
+  Genes = rownames(mb_expression_matrix)
+  )
+
+ggplot(cors_gene, aes(x=cors)) +
+  geom_histogram(binwidth=0.02)+
+  theme_bw(base_size = 16)+
+  ylab("Frequency")+
+  xlab("Correlation of Genes")
+
+summary(cors_gene$cors)
+
+cors_gene_asc <- cors_gene[with(cors_gene, order(cors)),]
+head(cors_gene_asc, 15)
+tail(cors_gene_asc, 15)
+
+# 
+
+
+nanoStringIC_fresh <- data.frame(t(nanoStringIC))
+nanoStringIC_DF_24 <- nanoStringIC_DF[match(rownames(nanoStringIC_fresh), rownames(nanoStringIC_DF)), ]
+
+nanoStringIC_fresh_FFPE <- merge(nanoStringIC_fresh, nanoStringIC_DF_24, by = 0)
+```
+
+
+```{r}
+features <- matchFeatures(Exp=t(nanoStringIC_fresh), Exp.by.feat="gene")
+features <- normalizeFeatures(features, "scale")
+res <- iC10(features)
+
+
+predicted_nssamples_fresh <- data.frame(res$class)
+rownames(predicted_nssamples_fresh) <- sub("-", ".", fixed = TRUE, rownames(predicted_nssamples_fresh))
+#dim(predicted_nssamples)
+IntClust_nssamples_fresh <- IntClust[which(IntClust$ID %in% rownames(predicted_nssamples_fresh)), ]
+IntClust_nssamples_fresh <- IntClust_nssamples_fresh[order(match(IntClust_nssamples_fresh$ID, rownames(predicted_nssamples_fresh))), ]
+
+
+sum(IntClust_nssamples_fresh$ID==rownames(predicted_nssamples_fresh))
+
+ic10_marcus_table_nssamples_fresh <- table(predicted_nssamples_fresh$res.class, IntClust_nssamples_fresh$IntClust)
+sum(diag(ic10_marcus_table_nssamples_fresh))/sum(ic10_marcus_table_nssamples_fresh)
+
+
+#accuracy = 0.2916667
+```
+
+```{r}
+sum(rownames(nanoStringIC_DF_24)==rownames(nanoStringIC_fresh))
+nanoStringIC_DF_24 <- nanoStringIC_DF_24[,match(colnames(nanoStringIC_fresh), colnames(nanoStringIC_DF_24))]
+
+sum(colnames(nanoStringIC_DF_24)==colnames(nanoStringIC_fresh))
+##plots per sample
+
+pdf(paste0(outputFolder,"Plots_per_sample_fresh_vs_ffpe.pdf"), width=8.3, height=11.7)
+par(mfrow=c(2, 2))
+for (i in 1:nrow(nanoStringIC_DF_24)) {
+   plot(log(as.numeric(nanoStringIC_DF_24[i, ]+1)), log(as.numeric(nanoStringIC_fresh[i,]+1)), main=rownames(nanoStringIC_fresh)[i], xlab="ffpe", ylab="Fresh")
+  for (j in 1:ncol(nanoStringIC_DF_24)){
+  if (nanoStringIC_DF_24[i,j]==0){text(log(as.numeric(nanoStringIC_DF_24[i, j]+1)), log(as.numeric(nanoStringIC_fresh[i,j]+1))+0.2, colnames(nanoStringIC_fresh[j]), cex=0.6)
+  }
+  }
+   linMod<-lm(log(as.numeric(nanoStringIC_fresh[i,]+1)) ~ log(unlist(as.numeric(nanoStringIC_DF_24[i,]+1))))
+   modsum = summary(linMod)
+   r2 = modsum$adj.r.squared
+   my.p = modsum$coefficients[2,4]
+   rp = vector('expression',2)
+ rp[1] = substitute(expression(italic(R)^2 == MYVALUE),
+                     list(MYVALUE = format(r2,dig=3)))[2]
+   rp[2] = substitute(expression(italic(p) == MYOTHERVALUE),
+                      list(MYOTHERVALUE = format(my.p, digits = 2)))[2]
+   abline(linMod,col="red")
+   legend('topleft', legend = rp, bty = 'n')
+  
+}
+dev.off()
+
+##plots per gene
+sum(colnames(nanoStringIC_DF_24)==colnames(nanoStringIC_fresh))
+
+pdf(paste0(outputFolder,"Plots_per_gene_fresh_vs_ffpe.pdf"), width=8.3, height=11.7)
+par(mfrow=c(2, 2))
+for (i in 1:ncol(nanoStringIC_DF_24)) {
+   plot(log(as.numeric(nanoStringIC_DF_24[,i ]+1)), log(as.numeric(nanoStringIC_fresh[,i]+1)), main=colnames(nanoStringIC_fresh)[i], xlab="ffpe", ylab="Fresh")
+  text(log(as.numeric(nanoStringIC_DF_24[,i ]+1)), log(as.numeric(nanoStringIC_fresh[,i]+1))+0.05, rownames(nanoStringIC_fresh), cex=0.6)
+ #
+   linMod<-lm(log(as.numeric(nanoStringIC_fresh[,i]+1)) ~ log(unlist(as.numeric(nanoStringIC_DF_24[,i]+1))))
+   modsum = summary(linMod)
+   r2 = modsum$adj.r.squared
+   my.p = modsum$coefficients[2,4]
+   rp = vector('expression',2)
+ rp[1] = substitute(expression(italic(R)^2 == MYVALUE),
+                     list(MYVALUE = format(r2,dig=3)))[2]
+   rp[2] = substitute(expression(italic(p) == MYOTHERVALUE),
+                      list(MYOTHERVALUE = format(my.p, digits = 2)))[2]
+   abline(linMod,col="red")
+   legend('topleft', legend = rp, bty = 'n')
+}
+dev.off()
+```
+```{r}
+#now we remove the dodgy samples and see whether it makes any difference
+nanoStringIC_fresh <- nanoStringIC_fresh[-which(rownames(nanoStringIC_fresh) %in% c("MB-0303", "MB-0036", "MB-0035", "MB-0374", "MB-0157")), ]
+nanoStringIC_DF_24 <- nanoStringIC_DF_24[-which(rownames(nanoStringIC_DF_24) %in% c("MB-0303", "MB-0036", "MB-0035", "MB-0374", "MB-0157")), ]
+
+
+pdf(paste0(outputFolder,"Plots_per_gene_fresh_vs_ffpe_reduced.pdf"), width=8.3, height=11.7)
+par(mfrow=c(2, 2))
+for (i in 1:ncol(nanoStringIC_DF_24)) {
+   plot(log(as.numeric(nanoStringIC_DF_24[,i ]+1)), log(as.numeric(nanoStringIC_fresh[,i]+1)), main=colnames(nanoStringIC_fresh)[i], xlab="ffpe", ylab="Fresh")
+  text(log(as.numeric(nanoStringIC_DF_24[,i ]+1)), log(as.numeric(nanoStringIC_fresh[,i]+1))+0.05, rownames(nanoStringIC_fresh), cex=0.6)
+   linMod<-lm(log(as.numeric(nanoStringIC_fresh[,i]+1)) ~ log(unlist(as.numeric(nanoStringIC_DF_24[,i]+1))))
+   modsum = summary(linMod)
+   r2 = modsum$adj.r.squared
+   my.p = modsum$coefficients[2,4]
+   rp = vector('expression',2)
+ rp[1] = substitute(expression(italic(R)^2 == MYVALUE),
+                     list(MYVALUE = format(r2,dig=3)))[2]
+   rp[2] = substitute(expression(italic(p) == MYOTHERVALUE),
+                      list(MYOTHERVALUE = format(my.p, digits = 2)))[2]
+   abline(linMod,col="red")
+   legend('topleft', legend = rp, bty = 'n')
+}
+dev.off()
+
+
+
+```
+

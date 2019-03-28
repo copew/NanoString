@@ -1,0 +1,95 @@
+---
+title: "cross-validate boosting logged"
+output: pdf_document
+---
+Using the leave one out method of cross validation,
+
+```{r Preparation, include=FALSE}
+#loading libraries
+library(ggplot2)
+library(lattice)
+library(caret)
+library(foreach)
+library(iterators)
+#library(doMC)
+library(parallel)
+library(rpart)
+
+#set up multicore
+#registerDoMC(cores = 4)
+
+#loading data
+setwd("/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/R scripts")
+load("nanoStringIC_DF.RData")
+
+#remove na
+nanoStringIC_DF <- na.omit(nanoStringIC_DF)
+nanoStringIC_DF_log <- log(nanoStringIC_DF[, -1]+0.0005)
+
+rownames(nanoStringIC_DF_log) <- rownames(nanoStringIC_DF)
+nanoStringIC_DF_log <- as.data.frame(nanoStringIC_DF_log)
+nanoStringIC_DF_log <- data.frame(iClust=nanoStringIC_DF$iClust, nanoStringIC_DF_log)
+```
+
+
+
+```{r echo=FALSE}
+total_matrix <- matrix(0, nrow = 480, ncol = 10)
+list_totaltree <- list()
+
+for (j in 1:nrow(nanoStringIC_DF_log)){
+  tmp.nanoStringIC_DF <-nanoStringIC_DF_log[-j,] 
+    one_matrix <- matrix(0, nrow=nrow(nanoStringIC_DF_log)-1, ncol = 10)
+  list_x.b.predict_DF <- list()
+  list_table <- list()
+  list_tree <- list()
+  w=rep(1/nrow(tmp.nanoStringIC_DF), nrow(tmp.nanoStringIC_DF))
+  alpha <- NULL
+  
+  for (i in 1:200){
+    m.tree <- rpart(iClust ~ ., weights = w, data=tmp.nanoStringIC_DF)
+  list_tree[[i]] <- m.tree
+  x.b.predict <- as.matrix(predict(m.tree, newdata = tmp.nanoStringIC_DF))
+  x.b.predict_DF <- as.data.frame(cbind(x.b.predict, factor(apply(x.b.predict, 1, which.max), levels=1:10), tmp.nanoStringIC_DF$iClust))
+  x.b.predict_DF[13] <- ifelse(x.b.predict_DF[,11]==x.b.predict_DF[,12], 0, 1)
+  error <- (sum(w * x.b.predict_DF[,13]))/(sum(w))
+  alpha <- c(alpha,log((1 - max(error, 1e-9))/max(error, 1e-9)))
+  w <- as.numeric(unlist(w * exp(alpha[i] * x.b.predict_DF[13])))
+  w <- w/sum(w)
+  #keep the prediction matrices each time......
+  #list_x.b.predict_DF[[i]] <- x.b.predict_DF
+  #list_table[[i]] <- table_x.b.predict
+  one_matrix <- (x.b.predict+as.vector(one_matrix)*sum(alpha[-i]))/sum(alpha)
+  #one_matrix <-  one_matrix + alpha[i] * x.b.predict
+  #cat(i, " max weight=", max(w), "error=", error, "\n")
+  
+  }
+  cv.predict <- as.matrix((predict(m.tree, newdata = nanoStringIC_DF_log[j,])))
+  total_matrix [j, ]<- cv.predict
+  
+  #plot(alpha, type = "l")
+  print(j)
+  }
+#table_predict <- table(apply(total_matrix, 1, which.max), nanoStringIC_DF$iClust)
+#table_predict<- as.data.frame.matrix(table_predict)
+#print(table_predict)
+list_totaltree[[i]] <- m.tree
+#View(as.data.frame.matrix(table_x.b.predict))
+#total_matrix
+#rowSums(total_matrix)
+
+save(total_matrix, file = "total_matrix.RData")
+total_matrix
+#rowSums(total_matrix)
+total_matrix <- as.data.frame(total_matrix)
+Predicted <- table(factor(apply(total_matrix, 1, which.max), levels=1:10),nanoStringIC_DF_log$iClust) 
+Predicted
+
+sum(diag(Predicted))/sum(Predicted)
+#rowSums(total_matrix)
+
+
+
+
+
+```

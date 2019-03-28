@@ -1,0 +1,318 @@
+---
+title: "Summarising Classification Method"
+output: pdf_document
+---
+
+
+**Aim**
+To generate a classifier to classify breast tumours into Integrative Clusters (iClust) using data obtained using NanoString platform.
+
+
+#Summary of Samples
+480 samples with known iClust status
+212 genes selected previously from the original classifier
+
+
+```{r Preparation, echo=FALSE}
+#loading libraries
+library(ggplot2)
+library(lattice)
+library(caret)
+library(foreach)
+library(iterators)
+#library(doMC)
+library(parallel)
+library(rpart)
+
+#set up multicore
+#registerDoMC(cores = 4)
+
+#loading data
+setwd("/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/R scripts")
+load("nanoStringIC_DF.RData")
+
+#remove na
+nanoStringIC_DF <- na.omit(nanoStringIC_DF)
+
+```
+
+#Feature Selection
+
+This step is to select genes that are sufficiently differentially expressed between the groups.
+
+All of the 212 iClust genes are included.
+Approximately 100 immune genes are also differentially expressed.  However these are not included here.  They will be included later.
+
+
+```{r Feature Selection, echo=FALSE}
+features <- data.frame(
+  p=sapply(2:ncol(nanoStringIC_DF),function(i){
+    anova(lm(log(nanoStringIC_DF[,i]+0.001) ~ nanoStringIC_DF$iClust))$"Pr(>F)"[1]
+  }),
+  ID=colnames(nanoStringIC_DF)[-1]
+)
+feature.ordered <- features[order(features$p),]
+feature.ordered
+```
+
+
+
+#Decision Tree
+
+A decision tree is a flow-chart liek structure in which each "junction" represents a "test" on an attribute, in this case, count of a gene.  
+
+
+Using a R package called "rpart", we can first make a tree with all 480 samples, then use it to predict each sample in turn.  The error we get will be apparent error.  Then we use 479 samples to generate a decision tree, which we then use to predict the classification of the remaining 1 sample (cross validation).
+
+
+with cross validation (leave one out)
+
+
+```{r}
+#Trees!
+cv <- matrix(NA, nrow(nanoStringIC_DF),10)
+for (i in 1:nrow(nanoStringIC_DF)){
+  m.tree <- rpart(iClust ~ ., data=nanoStringIC_DF[-i,])
+  #plot(m.tree)
+  #text(m.tree, use.n=T, cex=0.5)
+cv[i, ] <- predict(m.tree, newdata = nanoStringIC_DF[i,])
+print(i)
+}
+
+#chose the cluster that it has highest probability
+table_cv <- table(apply(cv, 1, which.max), nanoStringIC_DF[,1])
+accuracy <- sum(diag(table_cv))/sum(table_cv)
+print(paste0("Accuracy: ", accuracy))
+#summary(m.tree)
+
+table_cv
+
+#classification
+#classify <- as.data.frame(predict(m.tree))
+#classify$iClust <- colnames(classify)[apply(classify, 1, which.max)]
+
+```
+
+In order to increase training set size, we can try to do random sampling with replacement - bootstrapping.  We will then repeat this many times and to work out error.
+
+accuracy: 0.3791667
+
+```{r}
+#make a null matrix
+total_matrix <- matrix(0, nrow = 480, ncol = 10)
+
+#iterate this 100 times or more
+
+for (j in 1:nrow(nanoStringIC_DF)){
+  tmp.nanoStringIC_DF <-nanoStringIC_DF[-j,] 
+  one_matrix <- matrix(0, ncol = 10)
+  for (i in 1:100){
+  x.b <- sample(tmp.nanoStringIC_DF, nrow(nanoStringIC_DF)-1, replace = T)
+  m.tree <- rpart(iClust ~ ., data=tmp.nanoStringIC_DF)
+  x.b.predict <- as.matrix(predict(m.tree, newdata = nanoStringIC_DF[j,]))
+  one_matrix <- (x.b.predict+one_matrix*(i-1))/i
+  #list_x.b.predict[[i]] <- x.b.predict
+  #now add the table and work out average
+  print(i)
+  }
+  total_matrix[j, ]<- one_matrix
+  print(j)
+}
+
+
+total_matrix <- as.data.frame(total_matrix)
+Predicted <- table(factor(apply(total_matrix, 1, which.max), levels=1:10),nanoStringIC_DF$iClust) 
+
+sum(diag(Predicted))/sum(Predicted)
+#rowSums(total_matrix)
+
+save(total_matrix, file = "total_matrix.RData")
+Predicted
+
+```
+
+
+using bootstrap method, to predict all the samples, rather than the remaining ones.... then repeat lots of times. get an average of a probability of each sample belonging to a cluster
+accuracy: 0.3938878
+hmmm
+
+```{r}
+#create a list
+list_x.b.predict <- list()
+
+#iterate this 100 times or more
+for (i in 1:100){
+  x.b <- sample(1:nrow(nanoStringIC_DF), nrow(nanoStringIC_DF), replace = T)
+  m.tree <- rpart(iClust ~ ., data=nanoStringIC_DF[x.b,])
+  x.b.predict <- predict(m.tree, newdata = nanoStringIC_DF[-x.b,])
+   table_x.b.predict <- table(factor(apply(x.b.predict, 1, which.max), levels=1:10), nanoStringIC_DF[-x.b, 1])
+
+x.b.predict
+# list_diagsum <- list()
+# list_totalsum <- list()
+
+  list_x.b.predict[[i]] <- table_x.b.predict
+# list_diagsum[[i]] <- sum(diag(table_x.b.predict))
+# list_totalsum[[i]] <- sum(table_x.b.predict)
+
+  print(i)
+}
+
+weighted_mean <- weighted.mean(sapply(list_x.b.predict, function(x) sum(diag(x))/sum(x)), w=sapply(list_x.b.predict, sum))
+weighted_mean
+
+
+list_x.b.predict
+
+#View(table_x.b.predict)
+
+
+
+```
+
+Boosting
+focus on the samples hat are incorrectly classified, change weight of parametrs to enable the correct classification of these.  
+This can make it perfect... but requires cross validation
+
+
+```{r echo=FALSE}
+#create a list
+list_x.b.predict_DF <- list()
+list_table <- list()
+list_tree <- list()
+#make a null matrix
+total_matrix <- matrix(0, nrow = 480, ncol = 10)
+
+#define weight
+w=rep(1/nrow(nanoStringIC_DF), nrow(nanoStringIC_DF))
+
+alpha <- NULL
+
+#iterate this 100 times or more
+for (i in 1:200){
+  #x.b <- sample(1:nrow(nanoStringIC_DF), nrow(nanoStringIC_DF), replace = T)
+  m.tree <- rpart(iClust ~ ., weights= w, data=nanoStringIC_DF)
+  list_tree[[i]] <- m.tree
+  
+  x.b.predict <- as.matrix(predict(m.tree, newdata = nanoStringIC_DF))
+  #total_matrix <- (x.b.predict+total_matrix*(i-1))/i
+ 
+  #now add the table and work out average
+  x.b.predict_DF <- as.data.frame(cbind(x.b.predict, factor(apply(x.b.predict, 1, which.max), levels=1:10), nanoStringIC_DF$iClust))
+  x.b.predict_DF[13] <- ifelse(x.b.predict_DF[,11]==x.b.predict_DF[,12], 0, 1)
+  
+  error <- (sum(w * x.b.predict_DF[,13]))/(sum(w))
+  alpha <- c(alpha,log((1 - error)/error))
+  
+  w <- as.numeric(unlist(w * exp(alpha * x.b.predict_DF[13])))
+  table_x.b.predict <- table(apply(total_matrix, 1, which.max), x.b.predict_DF[,12])
+  #keep the prediction matrices each time......
+  list_x.b.predict_DF[[i]] <- x.b.predict_DF
+  list_table[[i]] <- table_x.b.predict
+  total_matrix <- (x.b.predict+total_matrix*sum(alpha[-i]))/sum(alpha)
+  
+  #print(i)
+}
+
+table_x.b.predict<- as.data.frame.matrix(table_x.b.predict)
+View(table_x.b.predict)
+
+View(as.data.frame.matrix(table_x.b.predict))
+#total_matrix
+#rowSums(total_matrix)
+
+#save(total_matrix, file = "total_matrix.RData")
+table(apply(total_matrix, 1, which.max), x.b.predict_DF[ ,12])
+
+plot(alpha, type="l")
+```
+
+so..... cross validation.... 
+Select 
+
+```{r echo=FALSE}
+total_matrix <- matrix(0, nrow = 480, ncol = 10)
+
+
+for (j in 1:nrow(nanoStringIC_DF)){
+  tmp.nanoStringIC_DF <-nanoStringIC_DF[-j,] 
+    one_matrix <- matrix(0, nrow=nrow(nanoStringIC_DF)-1, ncol = 10)
+  list_x.b.predict_DF <- list()
+  list_table <- list()
+  list_tree <- list()
+  w=rep(1/nrow(tmp.nanoStringIC_DF), nrow(tmp.nanoStringIC_DF))
+  alpha <- NULL
+  
+  for (i in 1:200){
+    m.tree <- rpart(iClust ~ ., weights = w, data=tmp.nanoStringIC_DF)
+  list_tree[[i]] <- m.tree
+  x.b.predict <- as.matrix(predict(m.tree, newdata = tmp.nanoStringIC_DF))
+  x.b.predict_DF <- as.data.frame(cbind(x.b.predict, factor(apply(x.b.predict, 1, which.max), levels=1:10), tmp.nanoStringIC_DF$iClust))
+  x.b.predict_DF[13] <- ifelse(x.b.predict_DF[,11]==x.b.predict_DF[,12], 0, 1)
+  error <- (sum(w * x.b.predict_DF[,13]))/(sum(w))
+  alpha <- c(alpha,log((1 - max(error, 1e-9))/max(error, 1e-9)))
+  w <- as.numeric(unlist(w * exp(alpha[i] * x.b.predict_DF[13])))
+  w <- w/sum(w)
+    #keep the prediction matrices each time......
+  #list_x.b.predict_DF[[i]] <- x.b.predict_DF
+  #list_table[[i]] <- table_x.b.predict
+  one_matrix <- (x.b.predict+as.vector(one_matrix)*sum(alpha[-i]))/sum(alpha)
+  #one_matrix <-  one_matrix + alpha[i] * x.b.predict
+  
+  cat(i, " max weight=", max(w), "error=", error, "\n")
+  
+  }
+  total_matrix [j, ]<- one_matrix
+  
+  #plot(alpha, type = "l")
+  print(j)
+  }
+table_x.b.predict <- table(apply(total_matrix, 1, which.max), x.b.predict_DF[,12])
+table_x.b.predict<- as.data.frame.matrix(table_x.b.predict)
+print(table_x.b.predict)
+
+View(as.data.frame.matrix(table_x.b.predict))
+#total_matrix
+#rowSums(total_matrix)
+
+save(total_matrix, file = "total_matrix.RData")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+total_matrix
+#rowSums(total_matrix)
+
+total_matrix <- as.data.frame(total_matrix)
+Predicted <- table(factor(apply(total_matrix, 1, which.max), levels=1:10),nanoStringIC_DF$iClust) 
+
+sum(diag(Predicted))/sum(Predicted)
+#rowSums(total_matrix)
+
+save(total_matrix, file = "total_matrix.RData")
+Predicted
+
+
+
+```
+
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+

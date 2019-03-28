@@ -1,0 +1,291 @@
+---
+title: "Rethink with Oscar"
+output: pdf_document
+---
+
+```{r}
+#the usual loading things
+
+library(ggplot2)
+library(reshape2)
+```
+
+
+only keep the discovery set
+```{r}
+nanostring_discovery <- nanoStringIC_DF[which(rownames(nanoStringIC_DF) %in% mb_discoveryset$METABRIC_ID), ]
+
+nanoStringIC_DF <- na.omit(nanoStringIC_DF)
+
+save(nanostring_discovery, file="nanostring_discovery.RData")
+```
+
+now we normalise each column in the discovery set
+
+```{r}
+ns_discovery_zscore <- data.frame(cbind(nanostring_discovery$iClust, scale(nanostring_discovery[, 2:213])))
+colnames(ns_discovery_zscore)[1] <- "iClust"
+
+
+```
+
+now we work out the mean value for each iClust in each gene
+
+```{r}
+iclust_centroid <- matrix(, nrow=10, ncol=212)
+for (j in 2:ncol(ns_discovery_zscore)){
+  for (i in 1:10) {
+  iclust_centroid[i, (j-1)] <- mean(ns_discovery_zscore[which(ns_discovery_zscore$iClust==i), j])
+  }
+#print(j)
+}
+iclust_centroid <- t(iclust_centroid)
+
+colnames(iclust_centroid) <- c("iC1", "iC2", "iC3", "iC4", "iC5", "iC6", "iC7", "iC8", 'iC9', 'iC10')
+rownames(iclust_centroid) <- colnames(ns_discovery_zscore)[-1]
+iclust_centroid <- data.frame(iclust_centroid)
+iclust_centroid$Genes <- rownames(iclust_centroid)
+
+
+```
+
+
+try to plot
+
+```{r}
+load("ic10_colour.RData")
+coliClust10$iClust <- paste0("iC", coliClust10$iClust)
+
+
+iclust_centroid_melted <- melt(iclust_centroid)
+colnames(iclust_centroid_melted)[2] <- "iClust"
+
+iclust_centroid_melted<- merge(iclust_centroid_melted, coliClust10, by="iClust")
+colnames(iclust_centroid_melted)[4] <- "Colour"
+
+ic10colour <- c(iclust_centroid_melted$Colour)
+
+ggplot(data=iclust_centroid_melted, aes(x=as.factor(Genes), y=value))+
+    geom_line(aes(group=iClust, colour=iClust))+
+    scale_colour_manual(values = c(iC1 = "#FF5500", iC2="#00EE76", iC3="#CD3278", iC4="#00C5CD", iC5="#8B0000", iC6="#FFFF40", iC7="#0000CD", iC8="#FFAA00", iC9="#EE82EE", iC10="#7D26CD"))+
+  theme_bw()+
+    theme(axis.text.x=element_text(angle=90, hjust=1))
+
+```
+
+Now continue using nanostring data, see how each sample correlate with this
+
+```{r}
+
+#this is the "reference" dataframe
+#iclust_centroid
+#save(iclust_centroid, file="iclust_centroid.RData")
+load("iclust_centroid.RData")
+
+ns_df_t <- data.frame(t(nanoStringIC_DF[,-1]))
+
+
+#chekcing genes are in the same order
+sum(rownames(ns_df_t)==rownames(iclust_centroid))
+#should be 212
+
+#for each row of the nanostring data (480 samples), get a correlation per sample with each of the 10 clusters
+correlation <- matrix(, nrow=480, ncol=10)
+for (i in 1:ncol(ns_df_t)) {
+  for (j in 1:10){
+    correlation[i,j] <- cor(ns_df_t[,i], iclust_centroid[,j], method = "spearman")
+    }
+  }
+
+rownames(correlation) <- sub(".", "-",colnames(ns_df_t), fixed=TRUE)
+colnames(correlation) <- colnames(iclust_centroid)
+
+#so now we have a matrix with correlations for each sample, between the sample's expression vs the centroid for each iclust
+
+correlation_discovery <- correlation[which(rownames(correlation) %in% rownames(ns_discovery_zscore)), ]
+
+
+cor(correlation_discovery)
+
+
+#now try to classify samples using the correlation
+
+correlation_classification <- data.frame(cbind(rownames(correlation), colnames(correlation)[apply(correlation, 1, function(x) which.max(x))]))
+colnames(correlation_classification) <- c("MB.ID", "iClust")
+correlation_classification$iClust <- sub("iC", "", correlation_classification$iClust,fixed=TRUE)
+
+#sum(correlation_classification$MB.ID == rownames(nanoStringIC_DF))
+correlation_max_table <- table(correlation_classification$iClust, nanoStringIC_DF$iClust)
+#correlation_max_table_discovery <- table(correlation_classification$iClust, nanoStringIC_DF$iClust)
+
+
+save(correlation, file="correlation.RData")
+
+```
+
+now sort the centroid value for each gene for each group and then plot lines
+
+```{r}
+#use iclust_centroid
+iclust_centroid$genes <- rownames(iclust_centroid)
+
+iclust_centroid_melted <- melt(iclust_centroid)
+
+#do iC1
+centroid_by_ic_list <- list()
+
+for (i in 1:10) {
+  centroid_by_ic_list[[i]] <- iclust_centroid_melted[which(iclust_centroid_melted$variable==paste0("iC", i)),]
+  print(i)
+  print(ggplot(centroid_by_ic_list[[i]], aes(x=factor(genes, levels = c(centroid_by_ic_list[[i]]$genes[order(centroid_by_ic_list[[i]]$value, decreasing = TRUE)])), y=value, group=1))+
+  geom_line(colour=coliClust10[i, 2], size=2)+
+  theme_bw(base_size = 12)+
+  geom_hline(yintercept=0, linetype="dotted")+
+  theme(axis.text.x = element_text(angle = 90, size = 6))+
+  xlab("Genes")+
+  ggtitle(paste("iC", i))
+    )
+  }
+
+# iclust_centroid_melted_1 <- iclust_centroid_melted[which(iclust_centroid_melted$variable=="iC1"),]
+# iclust_centroid_melted_1_sorted <- iclust_centroid_melted_1[c(order(iclust_centroid_melted_1$value, decreasing = TRUE)), ]
+# 
+# ggplot(iclust_centroid_melted_1_sorted, aes(x=factor(genes, levels = c(iclust_centroid_melted_1$genes[order(iclust_centroid_melted_1$value, decreasing = TRUE)])), y=value, group=1))+
+#   geom_line()+theme_bw()+geom_hline(yintercept=0, linetype="dotted")+theme(axis.text.x = element_text(angle = 90))
+```
+
+To pick the top few genes in each cluster 
+```{r}
+iclust_gene_list_high <- list()
+iclust_gene_list_low <- list()
+for (i in 1:10) {
+ iclust_gene_list_high[[i]] <- cbind(head(centroid_by_ic_list[[i]]$genes[order(centroid_by_ic_list[[i]]$value, decreasing = TRUE)], n=10))
+iclust_gene_list_low[[i]] <- cbind(tail(centroid_by_ic_list[[i]]$genes[order(centroid_by_ic_list[[i]]$value, decreasing = TRUE)], n=10))
+ 
+ }
+
+iclust_gene_list_combined_high <- data.frame(do.call(rbind, iclust_gene_list_high))
+iclust_gene_list_combined_low <- data.frame(do.call(rbind, iclust_gene_list_low))
+
+ns_selected_genes <- data.frame(t(nanoStringIC_DF))
+ns_selected_genes$genes <- as.factor(rownames(ns_selected_genes))
+ns_selected_genes <- ns_selected_genes[c(1, which(ns_selected_genes$genes %in% iclust_gene_list_combined_high$do.call.rbind..iclust_gene_list_high. ), which(ns_selected_genes$genes %in% iclust_gene_list_combined_low$do.call.rbind..iclust_gene_list_low.)), ]
+colnames(ns_selected_genes) <- ns_selected_genes[1,]
+ns_selected_genes_melted <- melt(ns_selected_genes, id.vars = "genes")
+
+ggplot(ns_selected_genes_melted, aes(x=genes, y=value))+
+  geom_jitter()
+```
+
+
+
+
+
+
+
+now do a heatmap of genes vs iClust centroids
+
+```{r}
+ggplot(iclust_centroid_melted, aes(x=variable, y=genes, fill=value))+
+  geom_tile()+
+  theme_bw(base_size = 16)+
+  xlab("Integrative Cluster")+
+  scale_fill_continuous(name = "Centroid Value")+
+  scale_fill_distiller(palette = "Spectral")
+  
+##now using pheatmap
+pheatmap(t(iclust_centroid[, 1:10]), cluster_rows = FALSE, fontsize = 8)
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+so for the same genes, what does the discovery set from metabric say
+
+
+```{r}
+#trim down the mb expression data
+
+mb_discoveryset$METABRIC_ID <- sub("-", ".", mb_discoveryset$METABRIC_ID)
+
+mb_disc_nsgenes <- Exp[which(rownames(Exp) %in% colnames(nanostring_discovery)), which(colnames(Exp) %in% mb_discoveryset$METABRIC_ID)]
+
+dim(mb_disc_nsgenes)
+#oh, only 206 x 997
+#some genes are missing.... oooops
+#they are
+#colnames(nanostring_discovery)[-which(colnames(nanostring_discovery) %in% rownames(Exp))]
+#"SMG8"    "PVT1"    "MRPL24"  "C8orf76" "CERS2"   "DCAF7" 
+
+#nevermind... carry on
+mb_disc_nsgenes <- t(mb_disc_nsgenes)
+mb_disc_nsgenes <- mb_disc_nsgenes[order(match(rownames(mb_disc_nsgenes), mb_discoveryset$METABRIC_ID)), ]
+
+
+
+
+```
+
+now we normalise each column in the discovery set
+
+```{r}
+mb_nsgenes_disc_zscore <- data.frame(cbind(mb_discoveryset$IntClustMemb, scale(mb_disc_nsgenes)))
+colnames(mb_nsgenes_disc_zscore)[1] <- "iClust"
+```
+
+
+now we work out the mean value for each iClust in each gene
+
+```{r}
+mb_iclust_centroid <- matrix(, nrow=10, ncol=206)
+for (j in 2:ncol(mb_nsgenes_disc_zscore)){
+  for (i in 1:10) {
+  mb_iclust_centroid[i, (j-1)] <- mean(mb_nsgenes_disc_zscore[which(mb_nsgenes_disc_zscore$iClust==i), j])
+  }
+#print(j)
+}
+mb_iclust_centroid <- t(mb_iclust_centroid)
+
+colnames(mb_iclust_centroid) <- c("iC1", "iC2", "iC3", "iC4", "iC5", "iC6", "iC7", "iC8", 'iC9', 'iC10')
+rownames(mb_iclust_centroid) <- colnames(mb_nsgenes_disc_zscore)[-1]
+mb_iclust_centroid <- data.frame(mb_iclust_centroid)
+mb_iclust_centroid$Genes <- rownames(mb_iclust_centroid)
+```
+
+try to plot
+
+```{r}
+load("ic10_colour.RData")
+coliClust10$iClust <- paste0("iC", coliClust10$iClust)
+
+
+mb_iclust_centroid_melted <- melt(mb_iclust_centroid)
+colnames(mb_iclust_centroid_melted)[2] <- "iClust"
+
+mb_iclust_centroid_melted<- merge(mb_iclust_centroid_melted, coliClust10, by="iClust")
+colnames(mb_iclust_centroid_melted)[4] <- "Colour"
+
+ic10colour <- c(mb_iclust_centroid_melted$Colour)
+
+ggplot(data=mb_iclust_centroid_melted, aes(x=as.factor(Genes), y=value))+
+    geom_line(aes(group=iClust, colour=iClust))+
+    scale_colour_manual(values = c(iC1 = "#FF5500", iC2="#00EE76", iC3="#CD3278", iC4="#00C5CD", iC5="#8B0000", iC6="#FFFF40", iC7="#0000CD", iC8="#FFAA00", iC9="#EE82EE", iC10="#7D26CD"))+
+  theme_bw()+
+    theme(axis.text.x=element_text(angle=90, hjust=1))
+
+```
+
+

@@ -1,0 +1,81 @@
+---
+title: "Bootstrapping with logged reading"
+output: pdf_document
+---
+
+```{r Preparation, include=FALSE}
+#loading libraries
+library(ggplot2)
+library(lattice)
+library(caret)
+library(foreach)
+library(iterators)
+#library(doMC)
+library(parallel)
+library(rpart)
+
+#set up multicore
+#registerDoMC(cores = 4)
+
+#loading data
+setwd("/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/R scripts")
+load("nanoStringIC_DF.RData")
+
+#remove na
+nanoStringIC_DF <- na.omit(nanoStringIC_DF)
+nanoStringIC_DF_log <- log(nanoStringIC_DF[, -1]+0.0005)
+
+rownames(nanoStringIC_DF_log) <- rownames(nanoStringIC_DF)
+nanoStringIC_DF_log <- as.data.frame(nanoStringIC_DF_log)
+nanoStringIC_DF_log <- data.frame(iClust=nanoStringIC_DF$iClust, nanoStringIC_DF_log)
+
+```
+
+In order to increase training set size, we can try to do random sampling with replacement - bootstrapping.  We will then repeat this many times and to work out error. the following has been iterated 100 times.  
+
+ 
+
+```{r echo=FALSE}
+
+#create a list
+list_x.b.predict <- list()
+
+#iterate this 100 times or more
+for (i in 1:100){
+  x.b <- sample(1:nrow(nanoStringIC_DF_log), nrow(nanoStringIC_DF_log), replace = T)
+  m.tree <- rpart(iClust ~ ., data=nanoStringIC_DF_log[x.b,])
+  x.b.predict <- predict(m.tree, newdata = nanoStringIC_DF_log[-x.b,])
+   table_x.b.predict <- table(factor(apply(x.b.predict, 1, which.max), levels=1:10), nanoStringIC_DF_log[-x.b, 1])
+
+#x.b.predict
+# list_diagsum <- list()
+# list_totalsum <- list()
+
+  list_x.b.predict[[i]] <- table_x.b.predict
+# list_diagsum[[i]] <- sum(diag(table_x.b.predict))
+# list_totalsum[[i]] <- sum(table_x.b.predict)
+
+  #print(i)
+}
+
+weighted_mean <- weighted.mean(sapply(list_x.b.predict, function(x) sum(diag(x))/sum(x)), w=sapply(list_x.b.predict, sum))
+
+
+#list_x.b.predict
+
+#View(table_x.b.predict)
+
+```
+An example predicted table include:
+
+```{r echo=FALSE}
+table_x.b.predict
+```
+
+The overall accuracy over 100 iterations:
+
+```{r echo=FALSE}
+
+print(paste0("Accuracy: ", weighted_mean))
+```
+

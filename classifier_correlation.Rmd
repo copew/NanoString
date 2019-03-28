@@ -1,0 +1,21 @@
+---
+title: "using correlation with centroid to make a classifier"
+output: pdf_document
+---
+
+
+```{r}
+library(randomForest)
+
+load("correlation.RData")
+#sum(rownames(correlation)==rownames(nanoStringIC_DF))
+correlation_rf <- randomForest(correlation_discovery, nanoStringIC_DF$iClust[which(rownames(nanoStringIC_DF) %in% rownames(correlation_discovery))])
+
+predict_correlation_rf <- predict(correlation_rf, correlation[-which(rownames(correlation) %in% rownames(correlation_discovery)), ])
+
+correlation_rf_table <- table(nanoStringIC_DF$iClust[-which(rownames(nanoStringIC_DF) %in% rownames(correlation_discovery))], predict_correlation_rf)
+
+
+diag(correlation_rf_table)/margin.table(correlation_rf_table, 1)
+save(correlation_rf_table, file="correlation_rf_table")
+```

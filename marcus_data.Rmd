@@ -1,0 +1,491 @@
+---
+title: "using marcus' data and to see whether sample selection has problem or probe selection"
+output: pdf_document
+---
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#loading data
+load("~/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/R scripts/220features.RData")
+library(iC10)
+library(ggplot2)
+library(reshape2)
+library(data.table)
+
+#save(IntClust, file="IntClust.RData")
+load("IntClust.RData")
+load("nanoStringIC_DF.RData")
+```
+
+Firstly using Marcus' data, run the 220 genes, 1980 samples with iC10 package to see what the accuracy is
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+features <- matchFeatures(Exp=t(DATA), Exp.by.feat="gene")
+features <- normalizeFeatures(features, "scale")
+res <- iC10(features)
+
+predicted <- data.frame(res$class)
+rownames(predicted) <- sub("-", ".", fixed = TRUE, rownames(predicted))
+#dim(predicted)
+rownames(IntClust) <- IntClust$ID
+IntClust <- IntClust[which(IntClust$ID %in% rownames(predicted)), ]
+IntClust <- IntClust[order(match(IntClust$ID, rownames(predicted))), ]
+#sum(IntClust$ID==rownames(predicted))
+
+#accuracy
+ic10_marcus_table <- table(predicted$res.class, IntClust$IntClust)
+sum(diag(ic10_marcus_table))/sum(ic10_marcus_table)
+
+#0.8345287
+
+```
+
+Now we use the samples that were used for the NS
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#rownames(nanoStringIC_DF)
+
+DATA_nssamples <- DATA[which(rownames(DATA) %in% rownames(nanoStringIC_DF)), ]
+#dim(DATA_nssamples)
+#456 metabric samples, 220 genes)
+
+#now run the iC10
+features <- matchFeatures(Exp=t(DATA_nssamples), Exp.by.feat="gene")
+features <- normalizeFeatures(features, "scale")
+res <- iC10(features)
+
+predicted_nssamples <- data.frame(res$class)
+rownames(predicted_nssamples) <- sub("-", ".", fixed = TRUE, rownames(predicted_nssamples))
+#dim(predicted_nssamples)
+IntClust_nssamples <- IntClust[which(IntClust$ID %in% rownames(predicted_nssamples)), ]
+IntClust_nssamples <- IntClust_nssamples[order(match(IntClust_nssamples$ID, rownames(predicted_nssamples))), ]
+#sum(IntClust_nssamples$ID==rownames(predicted_nssamples))
+
+#accuracy
+ic10_marcus_table_nssamples <- table(predicted_nssamples$res.class, IntClust_nssamples$IntClust)
+sum(diag(ic10_marcus_table_nssamples))/sum(ic10_marcus_table_nssamples)
+
+#0.8442982
+```
+
+
+now with nanostring Data
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+nanostring_metabric <- nanoStringIC_DF[1:458, ]
+rownames(nanostring_metabric) <- sub("-", ".", fixed = TRUE, rownames(nanostring_metabric))
+nanostring_metabric <- nanostring_metabric[which(rownames(nanostring_metabric) %in% IntClust$ID), ]
+rownames(nanostring_metabric) <- sub("-", ".", fixed = TRUE, rownames(nanostring_metabric))
+
+features_ns <- matchFeatures(Exp=t(nanostring_metabric[, -1]), Exp.by.feat="gene")
+features_ns <- normalizeFeatures(features_ns, "scale")
+res <- iC10(features_ns)
+
+predicted_ns <- data.frame(res$class)
+
+#dim(predicted_ns)
+rownames(predicted_ns) <- sub("-", ".", fixed = TRUE, rownames(predicted_ns))
+IntClust_ns <- IntClust[which(IntClust$ID %in% rownames(predicted_ns)), ]
+
+IntClust_ns <- IntClust_ns[order(match(IntClust_ns$ID, rownames(predicted_ns))), ]
+#mean(IntClust_ns$ID==rownames(predicted_ns))
+
+correct_prediction <- data.frame(cbind(IntClust_ns$ID, IntClust_ns$IntClust, predicted_ns$res.class))
+names(correct_prediction) <- c('MBID', 'IntClust', "predictedIntClust")
+correct_prediction <- correct_prediction[which(correct_prediction$IntClust==correct_prediction$predictedIntClust), ]
+write.csv(correct_prediction, file="correct_prediction.csv")
+
+#accuracy
+ic10_marcus_table_nsdata <- table(predicted_ns$res.class, IntClust_ns$IntClust)
+sum(diag(ic10_marcus_table_nsdata))/sum(ic10_marcus_table_nsdata)
+
+
+#0.4868421
+```
+
+now there are 3 genes difference between the nanostring data and the illumina data with same samples.  we now limit the illumina one to the same 139 genes and rerun, to make sure these are not crucial genes
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+#using DATA_nssamples
+#456 metabric samples, 220 genes)
+#now remove the genes
+extra3genes <- rownames(features$Exp)[-which(rownames(features$Exp) %in% rownames(features_ns$Exp))]
+
+DATA_nssamples_139genes <- DATA_nssamples[, -which(colnames(DATA_nssamples) %in% extra3genes)]
+
+
+#now run the iC10
+features_ns139genes <- matchFeatures(Exp=t(DATA_nssamples_139genes), Exp.by.feat="gene")
+features_ns139genes <- normalizeFeatures(features_ns139genes, "scale")
+res <- iC10(features_ns139genes)
+
+predicted_nssamples_139genes <- data.frame(res$class)
+rownames(predicted_nssamples_139genes) <- sub("-", ".", fixed = TRUE, rownames(predicted_nssamples_139genes))
+#dim(predicted_nssamples_139genes)
+IntClust_nssamples_139genes <- IntClust[which(IntClust$ID %in% rownames(predicted_nssamples_139genes)), ]
+IntClust_nssamples_139genes <- IntClust_nssamples_139genes[order(match(IntClust_nssamples_139genes$ID, rownames(predicted_nssamples_139genes))), ]
+#sum(IntClust_nssamples_139genes$ID==rownames(predicted_nssamples_139genes))
+
+#accuracy
+ic10_marcus_table_nssamples_139genes <- table(predicted_nssamples_139genes$res.class, IntClust_nssamples_139genes$IntClust)
+sum(diag(ic10_marcus_table_nssamples_139genes))/sum(ic10_marcus_table_nssamples_139genes)
+
+#0.8552632
+```
+
+ok then in that case the correlation of genes are not good. get the correlations
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#comparing correlation
+#save(cors_gene, file="cors_gene.RData")
+load("cors_gene.RData")
+
+cors_gene <- cors_gene[order(cors_gene$cors), ]
+
+cors_gene_139 <- cors_gene[which(cors_gene$Genes %in% rownames(features$Exp)), ]
+
+ggplot(cors_gene_139, aes(x=cors))+
+  geom_density()+
+  theme_bw(base_size = 14)+
+  xlab("R squared")+
+  ggtitle("Correlation of Illumina and NanoString Data")
+
+
+```
+
+
+Now we sort the genes in order of correlation (high to low), and take the first 50 genes and compare the accuracy of prediction.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+rownames(cors_gene_139) <- NULL
+cors_gene_139 <- cors_gene_139[order(-cors_gene_139$cors), ]
+
+#now subset the illumina and nanostring data using the same order of genes for subsetting
+illumina_50corgenes <- DATA_nssamples_139genes[ , which(colnames(DATA_nssamples_139genes) %in% cors_gene_139$Genes[1:50])]
+nanostring_50corgenes <- nanostring_metabric[, which(colnames(nanostring_metabric) %in% cors_gene_139$Genes[1:50])]
+
+#now run the iC10 - firstly illumina data
+features_50genes <- matchFeatures(Exp=t(illumina_50corgenes), Exp.by.feat="gene")
+features_50genes <- normalizeFeatures(features_50genes, "scale")
+res <- iC10(features_50genes)
+
+predicted_ill_50genes <- data.frame(res$class)
+rownames(predicted_ill_50genes) <- sub("-", ".", fixed = TRUE, rownames(predicted_ill_50genes))
+#dim(predicted_ill_50genes)
+IntClust_ill_50genes <- IntClust[which(IntClust$ID %in% rownames(predicted_ill_50genes)), ]
+IntClust_ill_50genes <- IntClust_ill_50genes[order(match(IntClust_ill_50genes$ID, rownames(predicted_ill_50genes))), ]
+#mean(IntClust_ill_50genes$ID==rownames(predicted_ill_50genes))
+
+#accuracy
+ic10_marcus_table_50genes <- table(predicted_ill_50genes$res.class, IntClust_ill_50genes$IntClust)
+print("Illumina:")
+sum(diag(ic10_marcus_table_50genes))/sum(ic10_marcus_table_50genes)
+
+#0.7258772
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#now run the iC10 - nanostring data
+features_50genes <- matchFeatures(Exp=t(nanostring_50corgenes), Exp.by.feat="gene")
+features_50genes <- normalizeFeatures(features_50genes, "scale")
+res <- iC10(features_50genes)
+
+predicted_ns_50genes <- data.frame(res$class)
+rownames(predicted_ns_50genes) <- sub("-", ".", fixed = TRUE, rownames(predicted_ns_50genes))
+#dim(predicted_ns_50genes)
+IntClust_ns_50genes <- IntClust[which(IntClust$ID %in% rownames(predicted_ns_50genes)), ]
+IntClust_ns_50genes <- IntClust_ns_50genes[order(match(IntClust_ns_50genes$ID, rownames(predicted_ns_50genes))), ]
+#mean(IntClust_ns_50genes$ID==rownames(predicted_ns_50genes))
+
+#accuracy
+ic10_marcus_table_50genes <- table(predicted_ns_50genes$res.class, IntClust_ns_50genes$IntClust)
+print("NanoString:")
+sum(diag(ic10_marcus_table_50genes))/sum(ic10_marcus_table_50genes)
+
+#0.4451754
+```
+
+It would appear that the difference has already occured within this 50 genes.  Now try with 25
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+rownames(cors_gene_139) <- NULL
+cors_gene_139 <- cors_gene_139[order(-cors_gene_139$cors), ]
+
+#now subset the illumina and nanostring data using the same order of genes for subsetting
+illumina_25corgenes <- DATA_nssamples_139genes[ , which(colnames(DATA_nssamples_139genes) %in% cors_gene_139$Genes[1:25])]
+nanostring_25corgenes <- nanostring_metabric[, which(colnames(nanostring_metabric) %in% cors_gene_139$Genes[1:25])]
+
+#now run the iC10 - firstly illumina data
+features_25genes <- matchFeatures(Exp=t(illumina_25corgenes), Exp.by.feat="gene")
+features_25genes <- normalizeFeatures(features_25genes, "scale")
+res <- iC10(features_25genes)
+
+predicted_ill_25genes <- data.frame(res$class)
+rownames(predicted_ill_25genes) <- sub("-", ".", fixed = TRUE, rownames(predicted_ill_25genes))
+#dim(predicted_ill_25genes)
+IntClust_ill_25genes <- IntClust[which(IntClust$ID %in% rownames(predicted_ill_25genes)), ]
+IntClust_ill_25genes <- IntClust_ill_25genes[order(match(IntClust_ill_25genes$ID, rownames(predicted_ill_25genes))), ]
+#mean(IntClust_ill_25genes$ID==rownames(predicted_ill_25genes))
+
+#accuracy
+ic10_marcus_table_25genes <- table(predicted_ill_25genes$res.class, IntClust_ill_25genes$IntClust)
+print("Illumina:")
+sum(diag(ic10_marcus_table_25genes))/sum(ic10_marcus_table_25genes)
+
+#0.6491228
+
+
+#now run the iC10 - nanostring data
+features_25genes <- matchFeatures(Exp=t(nanostring_25corgenes), Exp.by.feat="gene")
+features_25genes <- normalizeFeatures(features_25genes, "scale")
+res <- iC10(features_25genes)
+
+predicted_ns_25genes <- data.frame(res$class)
+rownames(predicted_ns_25genes) <- sub("-", ".", fixed = TRUE, rownames(predicted_ns_25genes))
+#dim(predicted_ns_25genes)
+IntClust_ns_25genes <- IntClust[which(IntClust$ID %in% rownames(predicted_ns_25genes)), ]
+IntClust_ns_25genes <- IntClust_ns_25genes[order(match(IntClust_ns_25genes$ID, rownames(predicted_ns_25genes))), ]
+#mean(IntClust_ns_25genes$ID==rownames(predicted_ns_25genes))
+
+#accuracy
+ic10_marcus_table_25genes <- table(predicted_ns_25genes$res.class, IntClust_ns_25genes$IntClust)
+print("NanoString:")
+sum(diag(ic10_marcus_table_25genes))/sum(ic10_marcus_table_25genes)
+
+#0.44098
+```
+
+Now to see how the genes correlates within themselves
+Take RSF1 for example, find the gene that is most correlated with RSF1, which is CLNS1A.  
+Left is using Illumina data
+Right is using Nanostring Data
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#illumina sample:
+#DATA_nssamples_139genes
+nanostring_metabric_139genes <- nanostring_metabric[, which(colnames(nanostring_metabric) %in% colnames(DATA_nssamples_139genes))]
+
+#easier to compare all 217..... as otherwise can't find the alternative names
+
+cor_illumina <- cor(DATA_nssamples_139genes)
+cor_nanostring <- cor(nanostring_metabric_139genes)
+
+#find out which ones are the most correlated with RSF1
+#names(sort(cor_illumina["RSF1", ]))
+#see how well the data for nanostring correlate with illumina data
+par(mfrow=c(1,2))
+plot(DATA[, "RSF1"], DATA[, "CLNS1A" ])
+plot(nanostring_metabric[, "RSF1"], nanostring_metabric[, "CLNS1A" ])
+
+melted_cor_illumina <- melt(cor_illumina)
+cor_illumina_139 <- cor(DATA_nssamples_139genes[, which(colnames(DATA_nssamples_139genes) %in% rownames(features_ns))])
+melted_cor_illumina_139 <- melt(cor_illumina_139)
+
+#heatmap for genes correlating with each other
+#ggplot(melted_cor_illumina, aes(x=Var1, y=Var2, fill=value))+
+#  geom_tile()
+
+```
+
+We now plot RSF1 in illumina vs nanostring for each integrative clusters
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#make a RSF1 dataframe
+nanoStringIC_DF <- na.omit(nanoStringIC_DF)
+nanostring_metabric <- nanoStringIC_DF[1:458,]
+#rownames(nanostring_metabric)
+#rownames(DATA_nssamples)
+#DATA_nssamples <- DATA[which(rownames(DATA) %in% rownames(nanostring_metabric)), ]
+nanostring_metabric <- nanostring_metabric[which(rownames(nanostring_metabric) %in% rownames(DATA_nssamples)), ]
+
+#dim(DATA_nssamples)
+#dim(nanostring_metabric)
+nanostring_metabric <- nanostring_metabric[order(match(rownames(nanostring_metabric),  rownames(DATA_nssamples))), ]
+
+
+
+
+RSF1_df <- data.frame(cbind(nanostring_metabric[,1], nanostring_metabric[, "RSF1"], DATA_nssamples[, "RSF1"]))
+
+colnames(RSF1_df) <- c("iClust", "NanoString", "Illumina")
+
+ggplot(RSF1_df, aes(x=log(NanoString), y=Illumina))+
+  geom_point()+
+  facet_wrap(~iClust)+
+  theme_bw()+
+  ggtitle("RSF1 gene expression, Illumina vs NanoString for each iClust")+
+  geom_text(aes(label=rownames(RSF1_df)), size=2, nudge_y = +0.15)
+
+
+
+```
+
+
+We then identified the outliers, and see if these are due to poor correlation - which isn't
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#who are the outliers?
+#firstly sort out a dataframe that has the right gene names
+DATA_nssamples_212genes <- DATA_nssamples[, which(colnames(DATA_nssamples) %in% colnames(nanostring_metabric))]
+DATA_nssamples_212genes <- DATA_nssamples_212genes[, order(match(colnames(DATA_nssamples_212genes), colnames(nanostring_metabric)[-1]))]
+#mean(colnames(DATA_nssamples_212genes) == colnames(nanostring_metabric)[-1])
+
+outliers_mbid <- c("MB-0428", "MB-0228")
+outliers_illumina <- DATA_nssamples_212genes[outliers_mbid, ]
+outliers_nanostring <- as.matrix(nanostring_metabric[outliers_mbid, -1])
+#mean(colnames(outliers_illumina)==colnames(outliers_nanostring))
+cor_outliers <- sapply(1:nrow(outliers_illumina), function (x) cor(outliers_illumina[x,], outliers_nanostring[x,]))
+
+par(mfrow=c(1,2))
+for (i in 1:2){
+  plot(outliers_illumina[i, ], log(outliers_nanostring[i,]), pch=20)
+  text(outliers_illumina[i, ], log(outliers_nanostring[i,])+0.2, colnames(outliers_illumina), cex=0.6)
+}
+
+cor_outliers
+# colnames(outliers_illumina)
+#, type="n"
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+#Now we look at each sample that should be in iC2 which are not correctly classified
+
+
+features_ic2 <- matchFeatures(Exp=t(nanostring_metabric[,-1]), Exp.by.feat="gene")
+features_ic2 <- normalizeFeatures(features_ic2, "scale")
+res <- iC10(features_ic2)
+
+predicted_ic2 <- data.frame(res$class)
+#mean(rownames(predicted_ic2)==rownames(nanostring_metabric))
+predicted_ic2$original <- nanostring_metabric$iClust
+#now subset it to those that are meant to be in iC2 but is predicted wrongly
+predicted_ic2_1 <- predicted_ic2[which((predicted_ic2$original==2) & (predicted_ic2$res.class != 2)), ]
+#now subset it to those that are NOT meant to be in iC2 but is predicted to be iC2
+predicted_ic2_2 <- predicted_ic2[which((predicted_ic2$original!=2) & (predicted_ic2$res.class == 2)), ]
+
+#now plot rsf1 and clns1a in these samples
+#firstly the ones that shoudl have been in ic2
+par(mfrow=c(1,2))
+plot(DATA[c(rownames(predicted_ic2_1)), "RSF1"], DATA[c(rownames(predicted_ic2_1)), "CLNS1A" ])
+plot(nanostring_metabric[c(rownames(predicted_ic2_1)), "RSF1"], nanostring_metabric[c(rownames(predicted_ic2_1)), "CLNS1A" ])
+
+#now the ones that are wrongly classified into iC2
+par(mfrow=c(1,2))
+plot(DATA[c(rownames(predicted_ic2_2)), "RSF1"], DATA[c(rownames(predicted_ic2_2)), "CLNS1A" ])
+plot(nanostring_metabric[c(rownames(predicted_ic2_2)), "RSF1"], nanostring_metabric[c(rownames(predicted_ic2_2)), "CLNS1A" ])
+
+
+#now plot for each of these incorrectly classified samples, the expression value for each gene and their value
+predicted_ic2_both <- data.frame(rbind(predicted_ic2_1, predicted_ic2_2))
+wrong_ic2 <- rbind(data.table(DATA_nssamples_212genes[rownames(predicted_ic2_both),], keep.rownames = T), data.table(log(nanostring_metabric[rownames(predicted_ic2_both),-1]), keep.rownames = T) )
+wrong_ic2$Method <- c( rep("Illumina", 11), rep("NanoString", 11))
+wrong_ic2_melted <- melt(wrong_ic2)
+
+ggplot(wrong_ic2_melted, aes(x=variable, y=value))+
+  geom_point()+
+  coord_flip()+
+  facet_grid(rn ~ Method, scales = "free_x")
+
+samples_list <- rownames(predicted_ic2_both)
+
+pdf("wrong_ic2.PDF")
+par(mfrow=c(1,1))
+par(mar = rep(2, 4))
+for (i in 1:11) {
+  tmp <- wrong_ic2_melted[rn==samples_list[i], ]
+  tmp_i <- tmp[Method=="Illumina", ]
+  tmp_i <- tmp_i[order(tmp_i$value), ]
+  tmp_n <- tmp[Method=="NanoString", ]
+  tmp_n <- tmp_n[order(tmp_n$value), ]
+  dotchart(tmp_i$value, labels=tmp_i$variable, cex = 0.5)
+  dotchart(tmp_n$value, labels=tmp_n$variable, cex=0.5)
+}
+dev.off()
+
+pdf("wrong_ic2_list.PDF")
+for (i in 1:11) {
+  tmp <- wrong_ic2_melted[rn==samples_list[i], ]
+  tmp_i <- tmp[Method=="Illumina", ]
+  tmp_i <- tmp_i[order(tmp_i$value), ]
+  tmp_n <- tmp[Method=="NanoString", ]
+  tmp_n <- tmp_n[order(tmp_n$value), ]
+  print(samples_list[i])
+  print("high")
+  print(tmp_i$variable[c(1:10, 203:212)])
+  print("low")
+  print(tmp_n$variable[c(1:10, 203:212)])
+}
+dev.off()
+
+
+
+
+
+
+```
+
+We now look at outliers for each sample
+
+```{r}
+nanostring_metabric <- nanostring_metabric[order(match(rownames(nanostring_metabric),  rownames(DATA_nssamples))), ]
+
+#sum(rownames(nanostring_metabric)==rownames(DATA_nssamples))
+DATA_nssamples_matched <- DATA_nssamples[, which(colnames(DATA_nssamples) %in% colnames(nanostring_metabric))]
+DATA_nssamples_matched <- DATA_nssamples_matched[, order(match(colnames(DATA_nssamples_matched), colnames(nanostring_metabric)[-1]))]
+#sum(colnames(nanostring_metabric)[-1] == colnames(DATA_nssamples_matched))
+library(ggplot2)
+gene_per_cluster <- list()
+pdf("Plots of Each Gene per Cluster.PDF")
+for (i in 2:ncol(nanostring_metabric)){
+  tmp.name <- colnames(nanostring_metabric)[i]
+  gene_per_cluster[[i-1]] <- data.frame(cbind(nanostring_metabric[,1], nanostring_metabric[, i], DATA_nssamples[, i-1]))
+  colnames(gene_per_cluster[[i-1]]) <- c("iClust", "NanoString", "Illumina")
+  plot<- ggplot(gene_per_cluster[[i-1]], aes(x=log(NanoString), y=Illumina))+
+          geom_point()+
+          facet_wrap(~iClust)+
+          theme_bw()+
+        ggtitle(paste0(tmp.name, "gene expression, Illumina vs NanoString for each iClust"))+
+          geom_text(aes(label=rownames(gene_per_cluster[[i-1]])), size=2, nudge_y = +0.15)
+print(plot)  
+}
+dev.off()
+
+outlier <- data.frame(matrix(,ncol = 212, nrow = 100))
+for (i in 1:length(gene_per_cluster)){
+  tmp.df <- gene_per_cluster[[i]]
+  colnames(outlier)[i] <-colnames(DATA_nssamples)[i] 
+  tmp.outlier <- vector()
+  for (j in 1:10){
+    tmp.iclust <- tmp.df[which(tmp.df$iClust==j), ]
+    tmp.lm <- lm(tmp.iclust$NanoString ~ tmp.iclust$Illumina)
+    tmp.iclust$CooksD <- cooks.distance(tmp.lm)
+    tmp.outlier <- c(tmp.outlier, rownames(tmp.iclust)[which(tmp.iclust$CooksD>3*mean(tmp.iclust$CooksD))])
+  }
+  length(tmp.outlier) <- 100
+  outlier[,i] <- tmp.outlier
+  }
+
+outlier <- data.frame(outlier[rowSums(is.na(outlier)) != ncol(outlier),])
+
+write.csv(outlier, file="outlier.csv")
+
+#we can also make another list which is to find out the ones that are incorrectly predicted, which genes are they outliers of
+library(readr)
+specimen_with_correlation <- read_csv("~/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Other Info/specimen_with_correlation.csv")
+
+specimen_with_correlation$ID <- sub("-AD", "", specimen_with_correlation$MBID, fixed=TRUE)
+specimen_with_correlation$genes <- NA
+
+outlier_by_id <- list()
+
+for (i in 1:nrow(specimen_with_correlation)){
+    outlier_by_id[[i]] <- names(outlier)[which(outlier == specimen_with_correlation$ID[i], arr.ind=T)[, "col"]]
+    names(outlier_by_id)[i] <- specimen_with_correlation$MBID[i]
+    length(outlier_by_id[[i]]) <- 100
+}
+
+outliers_id <- data.frame(do.call(rbind, outlier_by_id))
+
+write.csv(outliers_id, file="outlier_id.csv")
+```
+

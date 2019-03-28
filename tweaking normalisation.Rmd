@@ -1,0 +1,350 @@
+---
+title: "Tweaking normalisation"
+output: pdf_document
+---
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+library(NanoStringNorm)
+library(ggplot2)
+library(reshape2)
+#dev.off()
+
+#save(mb_expression_matrix, file="mb_expression_matrix.RData")
+load("mb_expression_matrix.RData")
+load("nanoStringIC_DF.RData")
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+batchNumber <- "Combined"
+metadataFolder <- "/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Other Info/"
+nanostringDataFolder <- paste0("/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Digital Analyser/",batchNumber,"/")
+outputFolder <- paste0("/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Nanostring QC/",batchNumber,"QC/")
+
+dir.create(outputFolder,showWarnings = FALSE)
+
+iC10genesFile <- paste0(metadataFolder,"for_nanostring.txt")
+metabricExpressionData <- paste0(metadataFolder,"METABRIC_CURTIS_EXPRESSION.RData")
+
+#pdf(paste0(outputFolder,"metrics.pdf"), width=11, height=8)
+
+nanoStringFiles <- list.files(nanostringDataFolder, pattern = "MB-AD", recursive = T, full.names = T)
+nanoStringData <- lapply(nanoStringFiles, read.csv,
+                         skip = 26, header = T, nrows = 773,quote=NULL,
+                         stringsAsFactors = F)
+#extract metabric id from file id
+metabricID <- regmatches(nanoStringFiles, regexpr("MB-AD-[0-9]*", nanoStringFiles))
+
+#rename count column to metabric ID
+for (i in seq_along(nanoStringData)){
+  colnames(nanoStringData[[i]])[colnames(nanoStringData[[i]])=="Count"] <-metabricID[[i]]
+}
+
+#convert list to dataframe
+nanoStringData <- do.call("cbind", nanoStringData)
+nanoStringData <- nanoStringData[, !duplicated(colnames(nanoStringData), fromLast = FALSE)] 
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+#Getting ready to correlate raw data with illumina data
+nanoStringData_trimmed <- nanoStringData[, 4:ncol(nanoStringData)]
+rownames(nanoStringData_trimmed) <- nanoStringData$Name
+colnames(nanoStringData_trimmed) <- sub("-AD-", "-", colnames(nanoStringData_trimmed), fixed=TRUE)
+nanoStringData_trimmed <- nanoStringData_trimmed[, match(colnames(mb_expression_matrix), colnames(nanoStringData_trimmed))]
+
+mean(colnames(nanoStringData_trimmed)==colnames(mb_expression_matrix))
+
+nanoStringData_trimmed <- nanoStringData_trimmed[which(rownames(nanoStringData_trimmed) %in% rownames(mb_expression_matrix)), ]
+
+nanoStringData_trimmed <- nanoStringData_trimmed[match(rownames(mb_expression_matrix), rownames(nanoStringData_trimmed)), ]
+mean(rownames(nanoStringData_trimmed)==rownames(mb_expression_matrix))
+
+nanoStringData_trimmed <- as.matrix(nanoStringData_trimmed)
+#now rows and columns are matched
+nanoStringData_trimmed_ic <- merge(data.frame(t(nanoStringData_trimmed)), nanoStringIC_DF, by="row.names")
+
+save(mb_expression_matrix, file="mb_expressioni_matrix.RData")
+save(nanoStringData_trimmed, file="nanoStringData_trimmed.RData")
+save(nanoStringData_trimmed_ic, file="nanoStringData_trimmed_ic.RData")
+
+
+#see that the RSF1 gene is reasonably distributed
+#which(rownames(mb_expression_matrix)=="RSF1")
+plot(nanoStringData_trimmed[156, ],mb_expression_matrix[156, ])
+plot(density(nanoStringData_trimmed["RSF1", ]))
+ggplot(nanoStringData_trimmed_ic, aes(x=iClust, y=RSF1.x))+
+  geom_boxplot()+
+  theme_bw()
+
+#it is... so we'll use this within each method
+```
+
+We have two sets of data for same samples and genes.  We now see which methods of normalisation should we use so that the nanostring data will correlate best with the illumina data.
+
+
+Firstly we look at the correlation using raw count.  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#calculating the correlations
+cors_gene_raw <- data.frame(
+  cors=sapply(1:nrow(mb_expression_matrix),function(i){
+    cor(nanoStringData_trimmed[i, ],mb_expression_matrix[i, ], method="spearman")
+    }), 
+  Genes = rownames(mb_expression_matrix)
+  )
+
+#create RSF1 subset
+rsf1_raw <- cors_gene_raw[156, ]
+
+#plotting the correlation
+ggplot(cors_gene_raw, aes(x=cors))+
+  geom_density()+
+  theme_bw(base_size = 14)+
+  xlab("R squared")+
+  ggtitle("Correlation of Illumina and NanoString Raw Data")+
+  geom_segment(aes(x = rsf1_raw$cors, y = 0, xend = rsf1_raw$cors, yend = 1.5), linetype=2)+
+  geom_text(data=rsf1_raw, aes(x=rsf1_raw$cors, y=1.7, label=paste("RSF1,", round(rsf1_raw$cors, 2))))
+
+```
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#make a dataset that is normalisable
+ns_raw <- nanoStringData
+
+rownames(ns_raw) <- nanoStringData$Name
+colnames(ns_raw) <- sub("-AD-", "-", colnames(ns_raw), fixed=TRUE)
+
+ns_raw <- cbind(ns_raw[, 1:3], ns_raw[, match(colnames(mb_expression_matrix), colnames(ns_raw))])
+mean(colnames(ns_raw)[4:ncol(ns_raw)]==colnames(mb_expression_matrix))
+
+ns_raw <- rbind(ns_raw[750:773,], ns_raw[match(rownames(mb_expression_matrix), rownames(ns_raw)), ])
+mean(rownames(ns_raw)[25:nrow(ns_raw)]==rownames(mb_expression_matrix))
+```
+
+Then try to normalise the data in the "standard" fashion
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#normalisation using NanoStringNorm
+nsdata_normalised1<- NanoStringNorm(
+  x = ns_raw,
+  anno = NA,
+  CodeCount = 'sum',
+  Background = 'mean',
+  SampleContent = 'housekeeping.sum',
+  round.values = FALSE,
+  take.log = FALSE,
+  return.matrix.of.endogenous.probes = TRUE
+)
+
+#calculating the correlations
+cors_genes_norm1 <- data.frame(
+  cors=sapply(1:nrow(mb_expression_matrix),function(i){
+    cor(nsdata_normalised1[i, ],mb_expression_matrix[i, ], method="spearman")
+    }), 
+  Genes = rownames(mb_expression_matrix)
+  )
+
+#create RSF1 subset
+rsf1_1 <- cors_genes_norm1[156, ]
+
+#plotting the correlation
+ggplot(cors_genes_norm1, aes(x=cors))+
+  geom_density()+
+  theme_bw(base_size = 14)+
+  xlab("R squared")+
+  ggtitle("Correlation of Illumina and NanoString Raw Data")+
+  geom_segment(data=rsf1_1, aes(x = cors, y = 0, xend = cors, yend = 1.5), linetype=2)+
+  geom_text(data=rsf1_1, aes(x=cors, y=1.7, label=paste("RSF1,", round(cors, 3))))
+```
+
+Now with z-value transformation method of normalisation:
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#normalisation using NanoStringNorm
+nsdata_normalised2<- NanoStringNorm(
+  x = ns_raw,
+  OtherNorm = "zscore",
+  return.matrix.of.endogenous.probes = TRUE
+)
+
+#calculating the correlations
+cors_genes_norm2 <- data.frame(
+  cors=sapply(1:nrow(mb_expression_matrix),function(i){
+    cor(as.matrix(nsdata_normalised2)[i, ],mb_expression_matrix[i, ], method="spearman")
+    }), 
+  Genes = rownames(mb_expression_matrix)
+  )
+
+#create RSF1 subset
+rsf1_2 <- cors_genes_norm2[156, ]
+
+#plotting the correlation
+ggplot(cors_genes_norm2, aes(x=cors))+
+  geom_density()+
+  theme_bw(base_size = 14)+
+  xlab("R squared")+
+  ggtitle("Correlation of Illumina and NanoString Raw Data")+
+  geom_segment(data=rsf1_2, aes(x = cors, y = 0, xend = cors, yend = 1.5), linetype=2)+
+  geom_text(data=rsf1_2, aes(x=cors, y=1.7, label=paste("RSF1,", round(cors, 3))))
+```
+
+Now we try the invrse normal transformation
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#normalisation using NanoStringNorm
+nsdata_normalised3<- NanoStringNorm(
+  x = ns_raw,
+  OtherNorm = "rank.normal",
+  return.matrix.of.endogenous.probes = TRUE
+)
+
+#calculating the correlations
+cors_genes_norm3 <- data.frame(
+  cors=sapply(1:nrow(mb_expression_matrix),function(i){
+    cor(as.matrix(nsdata_normalised3)[i, ],mb_expression_matrix[i, ], method="spearman")
+    }), 
+  Genes = rownames(mb_expression_matrix)
+  )
+
+#create RSF1 subset
+rsf1_3 <- cors_genes_norm3[156, ]
+
+#plotting the correlation
+ggplot(cors_genes_norm3, aes(x=cors))+
+  geom_density()+
+  theme_bw(base_size = 14)+
+  xlab("R squared")+
+  ggtitle("Correlation of Illumina and NanoString Raw Data")+
+  geom_segment(data=rsf1_3, aes(x = cors, y = 0, xend = cors, yend = 1.5), linetype=2)+
+  geom_text(data=rsf1_3, aes(x=cors, y=1.7, label=paste("RSF1,", round(cors, 3))))
+```
+
+We now use the quantile normalisation
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#normalisation using NanoStringNorm
+nsdata_normalised4<- NanoStringNorm(
+  x = ns_raw,
+  OtherNorm = "quantile",
+  return.matrix.of.endogenous.probes = TRUE
+)
+
+#calculating the correlations
+cors_genes_norm4 <- data.frame(
+  cors=sapply(1:nrow(mb_expression_matrix),function(i){
+    cor(as.matrix(nsdata_normalised4)[i, ],mb_expression_matrix[i, ], method="spearman")
+    }), 
+  Genes = rownames(mb_expression_matrix)
+  )
+
+#create RSF1 subset
+rsf1_4 <- cors_genes_norm4[156, ]
+
+#plotting the correlation
+ggplot(cors_genes_norm4, aes(x=cors))+
+  geom_density()+
+  theme_bw(base_size = 14)+
+  xlab("R squared")+
+  ggtitle("Correlation of Illumina and NanoString Raw Data")+
+  geom_segment(data=rsf1_4, aes(x = cors, y = 0, xend = cors, yend = 1.5), linetype=2)+
+  geom_text(data=rsf1_4, aes(x=cors, y=1.7, label=paste("RSF1,", round(cors, 3))))
+```
+
+We now try the variance stabilising normalisation.  There are 3 different ways of performing this.  
+Firstly we fit and predict with "all" genes (controls and endogenous)
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#normalisation using NanoStringNorm
+nsdata_normalised5_1<- NanoStringNorm(
+  x = ns_raw,
+  OtherNorm = "vsn",
+  return.matrix.of.endogenous.probes = FALSE,
+  genes.to.fit = "all", 
+  genes.to.predict = "all"
+)
+
+#calculating the correlations
+cors_genes_norm5_1 <- data.frame(
+  cors=sapply(1:nrow(mb_expression_matrix),function(i){
+    cor(as.matrix(nsdata_normalised5_1[[1]][15:231, 4:461])[i, ],mb_expression_matrix[i, ], method="spearman")
+    }), 
+  Genes = rownames(mb_expression_matrix)
+  )
+
+#create RSF1 subset
+rsf1_5_1 <- cors_genes_norm5_1[156, ]
+
+#plotting the correlation
+ggplot(cors_genes_norm5_1, aes(x=cors))+
+  geom_density()+
+  theme_bw(base_size = 14)+
+  xlab("R squared")+
+  ggtitle("Correlation of Illumina and NanoString Raw Data")+
+  geom_segment(data=rsf1_5_1, aes(x = cors, y = 0, xend = cors, yend = 1.5), linetype=2)+
+  geom_text(data=rsf1_5_1, aes(x=cors, y=1.7, label=paste("RSF1,", round(cors, 3))))
+```
+
+We then try a method that fit the model on the "controls" and predict on the "endogenous".  
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#normalisation using NanoStringNorm
+nsdata_normalised5_2<- NanoStringNorm(
+  x = ns_raw,
+  OtherNorm = "vsn",
+  return.matrix.of.endogenous.probes = FALSE,
+  genes.to.fit = "controls", 
+  genes.to.predict = "endogenous"
+)
+
+#calculating the correlations
+cors_genes_norm5_2 <- data.frame(
+  cors=sapply(1:nrow(mb_expression_matrix),function(i){
+    cor(as.matrix(nsdata_normalised5_2[[1]][15:231, 4:461])[i, ],mb_expression_matrix[i, ], method="spearman")
+    }), 
+  Genes = rownames(mb_expression_matrix)
+  )
+
+#create RSF1 subset
+rsf1_5_2 <- cors_genes_norm5_2[156, ]
+
+#plotting the correlation
+ggplot(cors_genes_norm5_2, aes(x=cors))+
+  geom_density()+
+  theme_bw(base_size = 14)+
+  xlab("R squared")+
+  ggtitle("Correlation of Illumina and NanoString Raw Data")+
+  geom_segment(data=rsf1_5_2, aes(x = cors, y = 0, xend = cors, yend = 1.5), linetype=2)+
+  geom_text(data=rsf1_5_2, aes(x=cors, y=1.7, label=paste("RSF1,", round(cors, 3))))
+```
+Thirdly apply standard normalisation strategies as an alternative to the vsn affine transformation  So basically applies the glog2 variance stabilising transformation to the adjusted counts
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#normalisation using NanoStringNorm
+nsdata_normalised5_3<- NanoStringNorm(
+  x = ns_raw,
+  CodeCount = "sum", 
+  Background = "mean", 
+  SampleContent = "top.geo.mean", 
+  OtherNorm = "vsn",
+  return.matrix.of.endogenous.probes = FALSE,
+  genes.to.fit = "endogenous", 
+  genes.to.predict = "endogenous", 
+  calib="none"
+)
+
+#calculating the correlations
+cors_genes_norm5_3 <- data.frame(
+  cors=sapply(1:nrow(mb_expression_matrix),function(i){
+    cor(as.matrix(nsdata_normalised5_3[[1]][15:231, 4:461])[i, ],mb_expression_matrix[i, ], method="spearman")
+    }), 
+  Genes = rownames(mb_expression_matrix)
+  )
+
+#create RSF1 subset
+rsf1_5_3 <- cors_genes_norm5_3[156, ]
+
+#plotting the correlation
+ggplot(cors_genes_norm5_3, aes(x=cors))+
+  geom_density()+
+  theme_bw(base_size = 14)+
+  xlab("R squared")+
+  ggtitle("Correlation of Illumina and NanoString Raw Data")+
+  geom_segment(data=rsf1_5_3, aes(x = cors, y = 0, xend = cors, yend = 1.5), linetype=2)+
+  geom_text(data=rsf1_5_3, aes(x=cors, y=1.7, label=paste("RSF1,", round(cors, 3))))
+```
+```

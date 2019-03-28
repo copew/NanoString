@@ -1,0 +1,73 @@
+---
+title: "Classification Tree"
+output: pdf_document
+---
+
+
+```{r include=FALSE}
+#loading libraries
+library(ggplot2)
+library(lattice)
+library(caret)
+library(foreach)
+library(iterators)
+#library(doMC)
+library(parallel)
+library(rpart)
+
+#set up multicore
+#registerDoMC(cores = 4)
+
+#loading data
+setwd("/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/R scripts")
+load("nanoStringIC_DF.RData")
+
+#remove na
+nanoStringIC_DF <- na.omit(nanoStringIC_DF)
+#nanoStringIC_DF_log <- apply(nanoStringIC_DF_log, 2, scale)
+
+nanoStringIC_DF_log <- log(nanoStringIC_DF[, -1]+0.0005)
+
+rownames(nanoStringIC_DF_log) <- rownames(nanoStringIC_DF)
+nanoStringIC_DF_log <- as.data.frame(nanoStringIC_DF_log)
+nanoStringIC_DF_log <- data.frame(iClust=nanoStringIC_DF$iClust, nanoStringIC_DF_log)
+
+```
+
+
+
+
+See the genes that are differentially expressed between the clusters.
+
+```{r include=FALSE}
+cv <- matrix(NA, nrow(nanoStringIC_DF_log),10)
+for (i in 1:nrow(nanoStringIC_DF_log)){
+  m.tree <- rpart(iClust ~ ., data=nanoStringIC_DF_log[-i,])
+
+cv[i, ] <- predict(m.tree, newdata = nanoStringIC_DF_log[i,])
+print(i)
+}
+```
+
+This is an example
+
+```{r echo=FALSE}
+plot(m.tree)
+text(m.tree, use.n=T, cex=0.5)
+```
+
+
+We here use the leave one out method, we see how well is this method at predicting all the samples
+
+```{r echo=FALSE}
+#chose the cluster that it has highest probability
+table_cv <- table(apply(cv, 1, which.max), nanoStringIC_DF[,1])
+accuracy <- sum(diag(table_cv))/sum(table_cv)
+print(paste0("Accuracy: ", accuracy))
+#summary(m.tree)
+table_cv
+
+
+
+```
+

@@ -1,0 +1,31 @@
+---
+title: "Boosting with cross-validation"
+output: pdf_document
+---
+
+We leave one sample out, and generate an *almost* perfect classifier using the rest (479 samples).  And we then use this to predict the one that was left out.  We then generated this
+
+
+```{r echo=FALSE}
+setwd("~/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/R scripts")
+load("~/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/R scripts/total_matrix.RData")
+load("nanoStringIC_DF.RData")
+nanoStringIC_DF <- na.omit(nanoStringIC_DF)
+Predicted <- table(factor(apply(total_matrix, 1, which.max), levels=1:10),nanoStringIC_DF$iClust) 
+Predicted
+```
+
+The accuracy is:
+
+```{r echo=FALSE}
+sum(diag(Predicted))/sum(Predicted)
+```
+
+The accuracy per iClust group:
+
+```{r echo=FALSE}
+diag(Predicted)/margin.table(Predicted, 1)
+
+```
+
+

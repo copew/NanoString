@@ -1,0 +1,98 @@
+---
+title: "Centroid from illumina data using metabric discovery set"
+output: pdf_document
+---
+
+
+We are aiming to compute the correlation for each sample from nanostring with the original centroids from illumina data of the discovery set from metabric
+
+
+First we get the centroids for these genes
+```{r}
+library(iC10)
+require(iC10TrainingData)
+load("nanoStringIC_DF.RData")
+
+#loading the information from the discovery set
+data(train.CN)
+data(train.Exp)
+features <- matchFeatures(Exp=train.Exp, Exp.by.feat="probe")
+features <- normalizeFeatures(features, "scale")
+res <- iC10(features)
+
+#now making the matrix that has genes and iclust and centroid
+names(res)
+illumina_disc_centroid <- data.frame(res$centroids)
+probe_genes <- data.frame(res$map.exp)
+rownames(illumina_disc_centroid) <- sub("_Exp", "", rownames(illumina_disc_centroid))
+illumina_disc_centroid$genes <- probe_genes$Gene_symbol[which(probe_genes$Probe_ID %in% rownames(illumina_disc_centroid))]
+
+illumina_disc_centroid <- illumina_disc_centroid[which(illumina_disc_centroid$genes %in% colnames(nanoStringIC_DF)),]
+rownames(illumina_disc_centroid) <- illumina_disc_centroid$genes
+
+
+test_illumina_centroid <- aggregate(illumina_disc_centroid, by=list(illumina_disc_centroid$genes), FUN=mean)
+rownames(test_illumina_centroid) <- test_illumina_centroid[,1]
+test_illumina_centroid <- test_illumina_centroid[, 2:11]
+
+#so now we have 132 genes and their centroids value for 10 iclusters
+
+```
+
+now to compute the the correlation between NS data and this matrix
+
+
+```{r}
+#firstly we subset the nanostring dataset to the existing 132 genes
+ns_132 <- nanoStringIC_DF[,which(colnames(nanoStringIC_DF) %in% rownames(test_illumina_centroid))]
+ns_132 <- t(ns_132)
+
+dim(ns_132)
+#132 with 489 columns of samples
+
+
+cor_nssample_illucentroids <- matrix( , nrow=489, ncol=10)
+for (i in 1:ncol(ns_132)) {
+  for (j in 1:10){
+    cor_nssample_illucentroids[i,j] <- cor(ns_132[,i], test_illumina_centroid[,j], method = "spearman")
+    }
+  }
+
+rownames(cor_nssample_illucentroids) <- sub(".", "-",colnames(ns_132), fixed=TRUE)
+colnames(cor_nssample_illucentroids) <- as.factor(1:10)
+
+```
+
+
+now we have this correlation, let's work out which is max first
+
+```{r}
+cor_ns_vs_illu_max_class <- data.frame(cbind(rownames(cor_nssample_illucentroids), colnames(cor_nssample_illucentroids)[apply(cor_nssample_illucentroids, 1, function(x) which.max(x))]))
+
+colnames(cor_ns_vs_illu_max_class) <- c("MB.ID", "iClust")
+
+sum(cor_ns_vs_illu_max_class$MB.ID == rownames(nanoStringIC_DF))
+cor_ns_vs_illu_max_table <- table(cor_ns_vs_illu_max_class$iClust, nanoStringIC_DF$iClust)
+
+#ok... total disaster
+```
+
+using iC10
+
+```{r}
+
+features <- matchFeatures(Exp=t(nanoStringIC_DF[,-1]), Exp.by.feat="gene")
+features <- normalizeFeatures(features, "scale")
+res <- iC10(features)
+
+
+#find which ones are not there
+used_genes <- sub("_Exp", "", rownames(res$centroids))
+missing_genes <- colnames(nanoStringIC_DF)[-which(colnames(nanoStringIC_DF) %in% used_genes )]
+data("Map.Exp")
+syn_genes <- unlist(strsplit(Map.Exp$Synonyms_0, ";"))
+
+missing_genes2 <- missing_genes[-which(missing_genes %in% syn_genes )]
+
+```
+

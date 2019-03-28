@@ -1,0 +1,153 @@
+Immune Genes using Nanostring
+
+
+```{r}
+#loading library
+library(ggplot2)
+library(NanoStringNorm)
+library(reshape2)
+library(ggplot2)
+library(lattice)
+library(caret)
+library(foreach)
+library(iterators)
+library(parallel)
+library(doMC)
+library(randomForest)
+registerDoMC(cores = 4)
+```
+
+
+```{r}
+#loading data
+
+batchNumber <- "Combined"
+metadataFolder <- "/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Other Info/"
+nanostringDataFolder <- paste0("/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Digital Analyser/",batchNumber,"/")
+outputFolder <- paste0("/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Nanostring QC/",batchNumber,"QC/")
+
+
+#Get int clust data
+iClust <- read.csv(paste0(metadataFolder,"IntClust.csv"))
+
+
+#Get clinical data
+clinical <- read.csv(paste0(metadataFolder,"Metabric.Clinical.csv"))
+colnames(clinical)[2] <- "ID"
+
+#getting MB-AD files
+nanoStringFiles <- list.files(nanostringDataFolder, pattern = "MB-AD", recursive = T, full.names = T)
+#Getting NT files
+nanoStringFiles<-c(nanoStringFiles, list.files(nanostringDataFolder, pattern="NT", recursive = T, full.names=T))
+#Getting TN files
+nanoStringFiles<-c(nanoStringFiles,
+                   list.files(nanostringDataFolder, pattern="TN", recursive = T, full.names=T))
+
+#get csv
+nanoStringData <- lapply(nanoStringFiles, read.csv,
+                         skip = 26, header = T, nrows = 773,quote=NULL,
+                         stringsAsFactors = F)
+
+#extract id from file id
+SampleID <- regmatches(nanoStringFiles, regexpr("MB-AD-[0-9]*", nanoStringFiles))
+SampleID <- c(SampleID, regmatches(nanoStringFiles, regexpr("NT-[0-9]*", nanoStringFiles)))
+SampleID <- c(SampleID, regmatches(nanoStringFiles, regexpr("TN-[0-9]*", nanoStringFiles)))
+
+
+for (i in seq_along(nanoStringData)){
+  colnames(nanoStringData[[i]])[colnames(nanoStringData[[i]])=="Count"] <-SampleID[[i]]
+}
+
+#convert list to dataframe
+nanoStringData <- do.call("cbind", nanoStringData)
+nanoStringData <- nanoStringData[, !duplicated(colnames(nanoStringData), fromLast = FALSE)] 
+
+
+
+#normalisation using NanoStringNorm
+normalisedNanoStringData <- NanoStringNorm(
+  x = nanoStringData,
+  anno = NA,
+  CodeCount = 'sum',
+  Background = 'mean',
+  SampleContent = 'housekeeping.sum',
+  round.values = FALSE,
+  take.log = FALSE,
+  return.matrix.of.endogenous.probes = TRUE
+)
+```
+
+
+
+
+nanostring norm suggested removing some samples ? do or not?
+
+```{r}
+#remove ones suggested by nanostring norm
+
+
+```
+
+combine iclust with nanostring data
+
+```{r}
+#data tidied up
+normData <- t(normalisedNanoStringData)
+normData <- as.data.frame(normData)
+normData$ID <- rownames(normData)
+normData$ID <- sub("-AD-", "-", normData$ID, fixed = T)
+normData <- merge(normData, iClust, by="ID", all.x=T)
+normData <- merge(normData, clinical, by="ID", all.x=T)
+normData <- normData[!is.na(normData$IntClust), ]
+```
+
+
+
+do not do na.omit otherwises will lose a lot of data at this stage
+
+
+
+feature selection wrt IntClust
+```{r}
+
+features <- data.frame(
+  p=sapply(2:(ncol(normData)-51),function(i){
+    anova(lm(log(normData[,i]+0.001) ~ normData$IntClust))$"Pr(>F)"[1]
+  }),
+  ID=colnames(normData)[2:(ncol(normData)-51)]
+)
+```
+
+select features that have p<0.05
+```{r}
+featured <- features[which(features$p<0.05),]
+normData_featured <- cbind(normData$ID, normData$IntClust,normData[, which(colnames(normData) %in% featured$ID)])
+colnames(normData_featured)[1:2] <- c("ID", "IntClust")
+rownames(normData_featured) <- normData_featured$ID
+normData_featured$ID <- NULL
+colnames(normData_featured) <- gsub(x = colnames(normData_featured), pattern = "-", replacement = "\\.")
+
+
+
+```
+
+try random forest
+```{r}
+nanostring_rf <- randomForest(IntClust~., data=normData_featured, ntree=200)
+print(nanostring_rf)
+```
+
+```{r}
+normData_featured$IntClust<-paste0("x",normData_featured$IntClust)
+ctrl <- trainControl(method = "repeatedcv", savePred=T, classProb=T, repeats=100)
+mod <- train(IntClust~., data=normData_featured, method = "rf", trControl = ctrl)
+mod$finalModel$confusion
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+

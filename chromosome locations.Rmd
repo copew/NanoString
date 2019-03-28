@@ -1,0 +1,50 @@
+---
+title: "chromosome locations"
+output: pdf_document
+---
+
+First we plot to see where the 220 genes that Marcus has specified is on the chromosomes
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(quantsmooth)
+library(readr)
+#load samples
+all_genes_location <- read_csv("~/Documents/OneDrive - University Of Cambridge/Documents/PhD/Nanostring/Other Info/all_genes_location.csv")
+load("nanoStringIC_DF.RData")
+ns_genes_location <- all_genes_location[which(all_genes_location$Gene %in% colnames(nanoStringIC_DF)), ]
+#ns_genes_location <- ns_genes_location[order(as.numeric(ns_genes_location$chr_hg38)), ]
+colnames(ns_genes_location)[2] <- "CHR"
+colnames(ns_genes_location)[5] <- "MapInfo"
+CHR <- ns_genes_location[2]
+MapInfo <- ns_genes_location[5]
+info <- data.frame(CHR,MapInfo)
+chrompos<-prepareGenomePlot(info,paintCytobands = TRUE, organism="hsa")
+points(chrompos[,2], chrompos[,1]+0.1, pch=3, col='red')
+text(chrompos[,2], chrompos[,1]+0.4,ns_genes_location$Gene, cex=0.5, srt=90)
+
+```
+
+Then we plot a heatmap to help us to compare this with the known copy number profiles
+
+```{r}
+library(pheatmap)
+library(dplyr)
+ns_heatmap <- nanoStringIC_DF
+ns_heatmap_withiclust <- ns_heatmap[order(ns_heatmap$iClust), ]
+ns_heatmap <- ns_heatmap[order(ns_heatmap$iClust), -1]
+ns_genes_location_ordered <- ns_genes_location[order(as.numeric(ns_genes_location$CHR), ns_genes_location$MapInfo), ]
+rownames(ns_genes_location_ordered) <- ns_genes_location_ordered$Gene
+chromosomes <- select(ns_genes_location_ordered, CHR)
+ns_heatmap <- ns_heatmap[, order(match(colnames(ns_heatmap), ns_genes_location_ordered$Gene))]
+chromosomes$CHR[208:212] <- "X"
+chromosomes$CHR <- as.factor(chromosomes$CHR)
+chromosomes <- data.frame(chromosomes)
+#mean(colnames(ns_heatmap) == ns_genes_location_ordered$Gene)
+#now that the ns_heatmap is ordered by genes and group
+
+
+ann_colours <- list(iClust=c('1'='#FF5500', '2'='#00EE76', '3'='#CD3278','4'='#00C5CD', '5'='#8B0000','6'='#FFFF40', '7'='#0000CD', '8'='#FFAA00', '9'='#EE82EE', '10'='#7D26CD'))
+
+pheatmap(log(ns_heatmap + 0.1), scale="column", color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYlBu")))(7), breaks = c( -2, -1, -0.5, 0, 0.5, 1, 2, 2.5), cluster_rows = FALSE, cluster_cols = FALSE, labels_row="", labels_col = "", annotation_row = select(ns_heatmap_withiclust, iClust), annotation_col = select(chromosomes, CHR), annotation_colors = ann_colours)
+```
+

@@ -1,0 +1,14 @@
+---
+title: "Tango slides"
+output: pdf_document
+---
+
+```{r}
+
+
+
+
+
+
+
+```

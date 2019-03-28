@@ -1,0 +1,70 @@
+---
+title: "R Notebook"
+output: pdf_document
+---
+
+```{r}
+#install packages
+library(spatstat)
+library(FITSio)
+library(SpatialTools)
+library(dbscan)
+library(spatstat)
+library(rpart)
+
+#read the fits files
+file_list <- list.files(path="/Users/cope01/Documents/OneDrive - University Of Cambridge/Documents/PhD/Neoadjuvant/IT_PT_zone/", pattern="*.fits", full.names = T) 
+files <- list.files()
+files <- lapply(file_list, readFITS)
+
+#put it into a list of dataframes
+reduced_files <- list()
+for (i in 1:length(files)) {
+  reduced_files[[i]] <-  data.frame(cbind(round(files[[i]]$col[[3]], 3), round(files[[i]]$col[[4]], 3), files[[i]]$col[[62]]))
+  colnames(reduced_files[[i]]) <- c("x", "y", "cell_type")
+  reduced_files[[i]][,3] <- as.character(reduced_files[[i]][,3])
+  reduced_files[[i]][,3] <- sub("4", "1", reduced_files[[i]][,3])
+  reduced_files[[i]] <- reduced_files[[i]][-which(reduced_files[[i]]$cell_type == "0"), ]
+  reduced_files[[i]][,3] <- as.factor(reduced_files[[i]][,3])
+  }
+
+#now put it into a format for spatstat
+formatted_data <- list()
+for (i in 1:length(reduced_files)){
+  formatted_data[[i]] <- ppp(reduced_files[[i]]$x, reduced_files[[i]]$y, c(min(reduced_files[[i]]$x)-1, max(reduced_files[[i]]$x+1)), c(min(reduced_files[[i]]$y-1), max(reduced_files[[i]]$y+1)))
+}
+
+#adding image_id, cell type
+for (i in 1:length(formatted_data)){
+  marks(formatted_data[[i]]) <- data.frame(cbind(reduced_files[[i]][,3], files[[i]]$col[[58]][1:length(reduced_files[[i]][,3])]))
+}
+
+#do the countour plot
+density_matrix <- density(formatted_data[[1]][which(formatted_data[[1]]$marks[,1] == "1"), ], 1000)
+contourlines <- contourLines(t(density_matrix$v), nlevels=10)
+#subset it based on contourline levels
+contourlinesubset <- list()
+for (i in 1:length(contourlines)) {
+  if (contourlines[[i]]$level==0.005){
+  contourlinesubset[[i]] <- contourlines[[i]]
+  }
+}
+plot.contourLines(contourlinesubset)
+
+
+
+
+#so now lets combine these lines
+contourlinesubset[sapply(contourlinesubset, is.null)] <- NULL
+df_list <- list()
+for (i in 1:length(contourlinesubset)) {
+  df_list[[i]] <- data.frame(cbind(contourlinesubset[[i]]$x, contourlinesubset[[i]]$y))
+  }
+lines_test <- do.call(rbind, df_list)
+lines_test <- as.matrix(lines_test)
+
+writeMat("/Users/cope01/Documents/MATLAB/lines_test.mat", lines_test=lines_test)
+
+writeMat("/Users/cope01/Documents/MATLAB/list_of_matrices.mat", df_list=df_list)
+```
+

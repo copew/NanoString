@@ -1,0 +1,38 @@
+---
+title: "Marcus' Data"
+output: pdf_document
+---
+
+```{r}
+#matrix is: DATA
+#rows are samples, columns are genes
+marcus <- DATA
+
+rownames(marcus) <- sub("-", ".", rownames(marcus), fixed=TRUE)
+sum(IntClust$ID %in% rownames(marcus))
+
+marcus_iclust <- IntClust[which(IntClust$ID %in% rownames(marcus)), ]
+
+#check colnames
+marcus_iclust <- marcus_iclust[order(match(marcus_iclust$ID, rownames(marcus))), ]
+sum(rownames(marcus) == marcus_iclust$ID)
+
+
+```
+
+so now we have the right dataset so we try a random forest with this to compare?
+
+```{r}
+#let's just do cross validation....
+marcus_rf_cv_list <- lapply(1:nrow(marcus), function(i) {
+  set.seed(100)
+  tmp.rf <- randomForest(marcus[-i, ], marcus_iclust$IntClust[-i])
+  tmp.pred <- predict(tmp.rf, marcus[i,], type = "response", predict.all=TRUE)
+  return(data.frame((rownames(marcus))[i], tmp.pred$aggregate))
+})
+
+marcus_rf_cv <- do.call(rbind.data.frame, marcus_rf_cv_list)
+
+
+```
+
